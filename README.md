@@ -96,31 +96,39 @@ OPENAI_MODEL=gpt-4o
 python chat.py
 ```
 
-You'll get a REPL. Type plain English; type `/help` for examples, `/quit` to exit.
+You'll get a REPL. Type plain English; you get plain-English answers back (no
+JSON, no internal routing shown). `/help` for examples, `/quit` to exit.
 
 ```
 you > how many active customers do we have?
-  route: READ -> read_master_agent -> customer_read_agent
-  { ... structured JSON answer ... }
+  We currently have 142 active customers out of 200 total (58 are inactive).
 
-you > /pending
-  { ...list of PENDING approval requests... }
+you > set account ACC000123 status to ACTIVE
+  Account ACC000123 status is already 'ACTIVE' - no change needed.
 
-you > /approve 42 alice
-  approval request #42 -> status APPROVED
+you > set account ACC000123 status to INACTIVE
+  I've prepared this change (update account status). This will change it from
+  'ACTIVE' to 'INACTIVE'. Reply 'yes' to approve and apply it, or 'no' to cancel.
+you > yes
+  Done - approved and applied (request #833).
 ```
 
-**Chat slash-commands**
+**How writes behave (conversational approval):**
+1. You ask for a change in plain English.
+2. The system checks the current value. If it already matches, you're told
+   "already X - no change needed" and **nothing is staged**.
+3. Otherwise you're shown exactly what will change (**from X to Y**) and asked to
+   confirm. Reply **`yes`** to approve and apply, or **`no`** to cancel.
+
+**Chat slash-commands** (optional shortcuts)
 
 | Command | Effect |
 |---|---|
 | `/help` | Show example questions |
-| `/raw` | Toggle full raw-JSON output |
-| `/read <q>` | Force routing through `read_master_agent` |
-| `/write <q>` | Force routing through `write_master_agent` |
+| `/raw` | Toggle full raw-JSON output (debugging) |
 | `/pending` | List all PENDING approval requests |
-| `/approve <id> <user>` | Approve a request — executes the staged DML |
-| `/reject <id> <user>` | Reject a request — no DML runs |
+| `/approve <id> <user>` | Approve a request directly — executes the staged DML |
+| `/reject <id> <user>` | Reject a request directly — no DML runs |
 | `/quit` `/exit` | Leave |
 
 ### Option B — Run as an MCP server (for Claude Desktop / any MCP client)
@@ -201,34 +209,42 @@ In `python chat.py`:
 ```
 you > List all PL/SQL packages in the schema
 ```
-**Expected:** `route: READ -> read_master_agent -> schema_agent` and a payload with
-`row_count: 9`.
+**Expected:** a plain-English reply naming the **9** packages (ACCOUNT_PKG,
+BILLING_PKG, …) and noting they're all VALID. Use `/raw` to see the underlying JSON.
 
-### 6.4 Natural-language WRITE → approval workflow
+### 6.4 No-op detection (write that changes nothing)
+
+In `python chat.py` (ACC000123 is ACTIVE in seed data):
+```
+you > set account ACC000123 status to ACTIVE
+```
+**Expected:** `Account ACC000123 status is already 'ACTIVE' - no change needed.`
+**No approval request is created.**
+
+### 6.5 Natural-language WRITE → conversational approval
 
 In `python chat.py`:
 ```
-you > Create a new currency XTS called Test Shilling, requested by tester
+you > set account ACC000123 status to INACTIVE
 ```
-**Expected:** `route: WRITE -> write_master_agent -> dml_agent` and
-`approval request #N -> status PENDING`. **Nothing is inserted yet.**
+**Expected:** a confirmation: *"This will change it from 'ACTIVE' to 'INACTIVE'.
+Reply 'yes' to approve … or 'no' to cancel."* **Nothing is changed yet.**
+```
+you > yes
+```
+**Expected:** `Done - approved and applied (request #N).` Replying `no` instead
+cancels it (the staged request is rejected, no DML runs).
 
-```
-you > /approve N tester
-```
-**Expected:** `status APPROVED` and `dml_result.dispatched: true`. Now the currency
-exists. (Re-approving the same id returns `ORA-20001` — the idempotency guard.)
-
-### 6.5 Root-cause analysis (chains 7 tools + GPT-4o)
+### 6.6 Root-cause analysis (chains 7 tools + GPT-4o)
 
 In `python chat.py`:
 ```
 you > Investigate billing and usage issues for customer CUST000122
 ```
-**Expected:** `route: READ -> read_master_agent -> rca_agent`, a non-empty
-`rca_summary`, and `billing_issues` / `event_anomalies` lists.
+**Expected:** a plain-English root-cause summary for CUST000122 with any billing
+issues and usage anomalies and recommended actions.
 
-### 6.6 Real seed identifiers (for your own tests)
+### 6.7 Real seed identifiers (for your own tests)
 
 | Thing | Example value |
 |---|---|

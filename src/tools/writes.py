@@ -59,6 +59,33 @@ def _not_found(message: str) -> dict:
     return {"success": False, "error_code": "NOT_FOUND", "message": str(message)}
 
 
+def _no_change(label: str, current: Any) -> dict:
+    """Returned by UPDATE tools when the target value already equals the current
+    value — no approval request is created."""
+    return {
+        "success": True,
+        "no_change": True,
+        "status": "NO_CHANGE",
+        "current_value": current,
+        "requested_value": current,
+        "message": f"{label} is already '{current}' - no change needed.",
+    }
+
+
+async def _current_value(conn: oracledb.AsyncConnection, sql: str, params: list):
+    """Best-effort read of one scalar (the current value of a column).
+
+    Returns None if the row or column is unavailable, so callers simply proceed
+    to stage the change as normal (no false no-op detection)."""
+    try:
+        rows = await _exec(conn, sql, params)
+    except Exception:
+        return None
+    if not rows:
+        return None
+    return next(iter(rows[0].values()), None)
+
+
 # ── Group A: Provider ─────────────────────────────────────────────────────────
 
 async def create_provider(
@@ -116,23 +143,30 @@ async def update_provider_status(
     conn = await get_connection()
     try:
         provider_id = await resolve_provider_code(conn, provider_code)
+        target = new_status.upper()
+        current = await _current_value(
+            conn, "SELECT STATUS FROM MCP_APP.PROVIDER WHERE PROVIDER_ID = :1",
+            [provider_id])
+        if current is not None and str(current).upper() == target:
+            return _no_change(f"Provider {provider_code} status", current)
+
         new_val = json.dumps({
             "sql": "UPDATE MCP_APP.PROVIDER SET STATUS = :2 WHERE PROVIDER_ID = :1",
-            "params": [provider_id, new_status.upper()],
+            "params": [provider_id, target],
         })
         req = await create_approval_request(
             conn,
             package_name="DIRECT_SQL",
             procedure_name="UPDATE_PROVIDER_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"provider_code": provider_code}),
+            old_value=json.dumps({"provider_code": provider_code, "old_status": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
         await log_audit(_TOOL, "PROVIDER", "update_provider_status", "UPDATE",
                         {"provider_code": provider_code, "new_status": new_status},
                         "SUCCESS")
-        return _ok(req)
+        return _ok({**req, "current_value": current, "requested_value": target})
     except ValueError as exc:
         return _not_found(exc)
     except Exception as exc:
@@ -200,20 +234,27 @@ async def update_customer_status(
     conn = await get_connection()
     try:
         customer_id = await resolve_customer_number(conn, customer_number)
-        new_val = json.dumps({"params": [customer_id, new_status.upper()]})
+        target = new_status.upper()
+        current = await _current_value(
+            conn, "SELECT STATUS FROM MCP_APP.CUSTOMER WHERE CUSTOMER_ID = :1",
+            [customer_id])
+        if current is not None and str(current).upper() == target:
+            return _no_change(f"Customer {customer_number} status", current)
+
+        new_val = json.dumps({"params": [customer_id, target]})
         req = await create_approval_request(
             conn,
             package_name="CUSTOMER_PKG",
             procedure_name="UPDATE_CUSTOMER_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"customer_number": customer_number}),
+            old_value=json.dumps({"customer_number": customer_number, "old_status": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
         await log_audit(_TOOL, "CUSTOMER_PKG", "update_customer_status", "UPDATE",
                         {"customer_number": customer_number, "new_status": new_status},
                         "SUCCESS")
-        return _ok(req)
+        return _ok({**req, "current_value": current, "requested_value": target})
     except ValueError as exc:
         return _not_found(exc)
     except Exception as exc:
@@ -343,6 +384,12 @@ async def update_contact_email(
 
     conn = await get_connection()
     try:
+        current = await _current_value(
+            conn, "SELECT EMAIL FROM MCP_APP.CONTACT WHERE CONTACT_ID = :1",
+            [int(contact_id)])
+        if current is not None and str(current).strip().lower() == new_email.strip().lower():
+            return _no_change(f"Contact {contact_id} email", current)
+
         new_val = json.dumps({
             "sql": "UPDATE MCP_APP.CONTACT SET EMAIL = :2 WHERE CONTACT_ID = :1",
             "params": [int(contact_id), new_email],
@@ -352,13 +399,13 @@ async def update_contact_email(
             package_name="DIRECT_SQL",
             procedure_name="UPDATE_CONTACT_EMAIL",
             action_type="UPDATE",
-            old_value=json.dumps({"contact_id": contact_id}),
+            old_value=json.dumps({"contact_id": contact_id, "old_email": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
         await log_audit(_TOOL, "CONTACT", "update_contact_email", "UPDATE",
                         {"contact_id": contact_id, "new_email": new_email}, "SUCCESS")
-        return _ok(req)
+        return _ok({**req, "current_value": current, "requested_value": new_email})
     except Exception as exc:
         return map_oracle_error(exc)
     finally:
@@ -426,20 +473,27 @@ async def update_account_status(
     conn = await get_connection()
     try:
         account_id = await resolve_account_number(conn, account_number)
-        new_val = json.dumps({"params": [account_id, new_status.upper()]})
+        target = new_status.upper()
+        current = await _current_value(
+            conn, "SELECT STATUS FROM MCP_APP.ACCOUNT WHERE ACCOUNT_ID = :1",
+            [account_id])
+        if current is not None and str(current).upper() == target:
+            return _no_change(f"Account {account_number} status", current)
+
+        new_val = json.dumps({"params": [account_id, target]})
         req = await create_approval_request(
             conn,
             package_name="ACCOUNT_PKG",
             procedure_name="UPDATE_ACCOUNT_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"account_number": account_number}),
+            old_value=json.dumps({"account_number": account_number, "old_status": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
         await log_audit(_TOOL, "ACCOUNT_PKG", "update_account_status", "UPDATE",
                         {"account_number": account_number, "new_status": new_status},
                         "SUCCESS")
-        return _ok(req)
+        return _ok({**req, "current_value": current, "requested_value": target})
     except ValueError as exc:
         return _not_found(exc)
     except Exception as exc:
@@ -461,6 +515,13 @@ async def set_account_billable(
     conn = await get_connection()
     try:
         account_id = await resolve_account_number(conn, account_number)
+        current = await _current_value(
+            conn,
+            "SELECT BILLABLE_FLAG FROM MCP_APP.ACCOUNT_DETAILS WHERE ACCOUNT_ID = :1",
+            [account_id])
+        if current is not None and str(current).upper() == flag:
+            return _no_change(f"Account {account_number} billable flag", current)
+
         new_val = json.dumps({
             "sql": "UPDATE MCP_APP.ACCOUNT_DETAILS SET BILLABLE_FLAG = :2 WHERE ACCOUNT_ID = :1",
             "params": [account_id, flag],
@@ -470,14 +531,14 @@ async def set_account_billable(
             package_name="DIRECT_SQL",
             procedure_name="SET_ACCOUNT_BILLABLE",
             action_type="UPDATE",
-            old_value=json.dumps({"account_number": account_number}),
+            old_value=json.dumps({"account_number": account_number, "old_flag": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
         await log_audit(_TOOL, "ACCOUNT_DETAILS", "set_account_billable", "UPDATE",
                         {"account_number": account_number, "billable_flag": flag},
                         "SUCCESS")
-        return _ok(req)
+        return _ok({**req, "current_value": current, "requested_value": flag})
     except ValueError as exc:
         return _not_found(exc)
     except Exception as exc:
@@ -678,27 +739,32 @@ async def update_bill_status(
     conn = await get_connection()
     try:
         rows = await _exec(conn,
-            "SELECT BILL_SUMMARY_ID FROM MCP_APP.BILL_SUMMARY "
+            "SELECT BILL_SUMMARY_ID, BILL_STATUS FROM MCP_APP.BILL_SUMMARY "
             "WHERE UPPER(INVOICE_NUMBER) = UPPER(:1)",
             [invoice_number])
         if not rows:
             return _not_found(f"Invoice '{invoice_number}' not found")
         bill_summary_id = rows[0]["bill_summary_id"]
+        target = new_status.upper()
+        current = rows[0].get("bill_status")
+        if current is not None and str(current).upper() == target:
+            return _no_change(f"Invoice {invoice_number} status", current)
 
-        new_val = json.dumps({"params": [bill_summary_id, new_status.upper()]})
+        new_val = json.dumps({"params": [bill_summary_id, target]})
         req = await create_approval_request(
             conn,
             package_name="BILLING_PKG",
             procedure_name="UPDATE_BILL_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"invoice_number": invoice_number}),
+            old_value=json.dumps({"invoice_number": invoice_number, "old_status": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
         await log_audit(_TOOL, "BILLING_PKG", "update_bill_status", "UPDATE",
                         {"invoice_number": invoice_number, "new_status": new_status},
                         "SUCCESS")
-        return _ok({**req, "invoice_number": invoice_number})
+        return _ok({**req, "invoice_number": invoice_number,
+                    "current_value": current, "requested_value": target})
     except ValueError as exc:
         return _not_found(exc)
     except Exception as exc:

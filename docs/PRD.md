@@ -607,6 +607,11 @@ customer invoices worth thousands. The framework ensures:
 - No accidental DML — every write staged as PENDING first
 - Full trail — who requested, who approved, what changed (OLD_VALUE vs NEW_VALUE)
 - Rollback visibility — REJECTED requests record reason permanently
+- No-op detection — UPDATE tools read the current value first; if it already
+  equals the requested value they return `{status:"NO_CHANGE"}` and stage nothing.
+  Otherwise the real current value is captured in OLD_VALUE and the response
+  includes `current_value`/`requested_value` so clients can show the change as
+  "from X to Y" before asking for confirmation.
 
 ### Approval Flow
 

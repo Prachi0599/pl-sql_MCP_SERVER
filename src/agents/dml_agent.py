@@ -503,7 +503,7 @@ async def run(question: str) -> dict:
         "SUCCESS" if tool_result.get("success") else "ERROR",
     )
 
-    return {
+    result = {
         "success": tool_result.get("success", False),
         "question": question,
         "action": action,
@@ -512,3 +512,9 @@ async def run(question: str) -> dict:
         "summary": tool_result.get("summary", ""),
         "details": tool_result,
     }
+    # Propagate no-op detection and before/after values so callers (and the chat
+    # client) can show a meaningful "already set" or "change from X to Y" message.
+    for key in ("no_change", "message", "current_value", "requested_value"):
+        if key in tool_result:
+            result[key] = tool_result[key]
+    return result
