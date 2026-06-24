@@ -638,6 +638,15 @@ customer invoices worth thousands. The framework ensures:
   For real UPDATEs the current value is captured in OLD_VALUE and the response
   includes `current_value`/`requested_value` so clients can show "from X to Y"
   before asking for confirmation.
+- CHECK-constraint coercion — verified against the live schema, several columns
+  are constrained, and the LLM can emit out-of-set values that would only fail at
+  approval (ORA-02290). Write tools now coerce/validate them up-front:
+  * SERVICE_REQUEST.PRIORITY ∈ {HIGH, MEDIUM, LOW} (CRITICAL/URGENT → HIGH)
+  * SERVICE_REQUEST.REQUEST_TYPE ∈ {DATA_FIX, BILLING_ADJUSTMENT, RCA, QUERY, OTHER}
+    (e.g. BILLING → BILLING_ADJUSTMENT; unknown → OTHER)
+  * BILLING_ADJUSTMENT.ADJUSTMENT_TYPE ∈ {CREDIT, DEBIT, DISPUTE, WAIVER}
+    (invalid types are rejected with VALIDATION_ERROR, not silently changed)
+  * CUSTOMER_NOTE.NOTE_TYPE ∈ {GENERAL, BILLING, ESCALATION, RCA, TECHNICAL}
 
 ### Approval Flow
 

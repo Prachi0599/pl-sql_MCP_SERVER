@@ -88,6 +88,26 @@ async def _current_value(conn: oracledb.AsyncConnection, sql: str, params: list)
     return next(iter(rows[0].values()), None)
 
 
+# ── Enum coercion ─────────────────────────────────────────────────────────────
+# These mirror the DB CHECK constraints. The LLM-driven agents can emit values
+# outside the allowed set (e.g. priority 'CRITICAL', request_type 'BILLING'),
+# which would only fail at approval time (ORA-02290). Coerce them up-front.
+
+_SR_PRIORITIES = {"HIGH", "MEDIUM", "LOW"}
+_SR_TYPES = {"DATA_FIX", "BILLING_ADJUSTMENT", "RCA", "QUERY", "OTHER"}
+_ADJ_TYPES = {"CREDIT", "DEBIT", "DISPUTE", "WAIVER"}
+_NOTE_TYPES = {"GENERAL", "BILLING", "ESCALATION", "RCA", "TECHNICAL"}
+
+
+def _coerce(value: str, allowed: set, default: str, synonyms: dict | None = None) -> str:
+    v = (value or "").upper().strip().replace(" ", "_")
+    if v in allowed:
+        return v
+    if synonyms and v in synonyms:
+        return synonyms[v]
+    return default
+
+
 # ── Group A: Provider ─────────────────────────────────────────────────────────
 
 async def create_provider(
@@ -863,6 +883,10 @@ async def create_billing_adjustment(
         return _validation_error("adjustment_amount must be a positive number")
     if not reason or not reason.strip():
         return _validation_error("reason is required")
+    adj_type = (adjustment_type or "").upper().strip()
+    if adj_type not in _ADJ_TYPES:
+        return _validation_error(
+            "adjustment_type must be one of CREDIT, DEBIT, DISPUTE, WAIVER")
 
     conn = await get_connection()
     try:
@@ -879,7 +903,7 @@ async def create_billing_adjustment(
         new_val = json.dumps({
             "params": [
                 bill_summary_id, account_id,
-                adjustment_type.upper(), adjustment_amount,
+                adj_type, adjustment_amount,
                 reason, requested_by,
             ]
         })
@@ -988,10 +1012,17 @@ async def create_service_request(
         if account_number:
             account_id = await resolve_account_number(conn, account_number)
 
+        rtype = _coerce(request_type, _SR_TYPES, "OTHER", {
+            "BILLING": "BILLING_ADJUSTMENT", "ADJUSTMENT": "BILLING_ADJUSTMENT",
+            "DATA": "DATA_FIX", "FIX": "DATA_FIX", "ROOT_CAUSE": "RCA",
+            "COMPLAINT": "QUERY", "QUESTION": "QUERY", "INQUIRY": "QUERY",
+        })
+        prio = _coerce(priority, _SR_PRIORITIES, "MEDIUM",
+                       {"CRITICAL": "HIGH", "URGENT": "HIGH"})
         new_val = json.dumps({
             "params": [
                 customer_id, account_id,
-                request_type.upper(), priority.upper(),
+                rtype, prio,
                 description, raised_by,
             ]
         })
@@ -1118,7 +1149,9 @@ async def add_customer_note(
                 "(NOTE_ID, CUSTOMER_ID, NOTE_TYPE, NOTE_TEXT, CREATED_BY) "
                 "VALUES (SEQ_CUSTOMER_NOTE.NEXTVAL, :1, :2, :3, :4)"
             ),
-            "params": [customer_id, note_type or "GENERAL", note_text, created_by],
+            "params": [customer_id,
+                       _coerce(note_type, _NOTE_TYPES, "GENERAL", {"TECH": "TECHNICAL"}),
+                       note_text, created_by],
         })
         req = await create_approval_request(
             conn,

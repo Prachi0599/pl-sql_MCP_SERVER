@@ -397,6 +397,41 @@ async def test_t12_13b_create_currency_approval_maps_ora_00001():
     assert result["success"] is False
 
 
+# ── T12-15/16: enum coercion against DB CHECK constraints ─────────────────────
+
+@pytest.mark.asyncio
+async def test_t12_15_service_request_enum_coercion():
+    """request_type/priority outside the CHECK-constraint set are coerced to
+    valid values before the approval is staged (else approval hits ORA-02290)."""
+    cap = AsyncMock(return_value=_PENDING)
+    with ExitStack() as s:
+        conn = _conn()
+        s.enter_context(patch(f"{_MODULE}.get_connection",
+                              new_callable=AsyncMock, return_value=conn))
+        s.enter_context(patch(f"{_MODULE}.log_audit", new_callable=AsyncMock))
+        s.enter_context(patch(f"{_MODULE}.create_approval_request", cap))
+        s.enter_context(patch(f"{_MODULE}.resolve_customer_number",
+                              new_callable=AsyncMock, return_value=10))
+        from src.tools.writes import create_service_request
+        result = await create_service_request(
+            "CUST-001", "BILLING", "CRITICAL", "desc", "alice")
+    assert result["success"] is True
+    params = json.loads(cap.call_args.kwargs["new_value"])["params"]
+    # [customer_id, account_id, request_type, priority, description, raised_by]
+    assert params[2] == "BILLING_ADJUSTMENT"   # BILLING -> valid type
+    assert params[3] == "HIGH"                  # CRITICAL -> valid priority
+
+
+@pytest.mark.asyncio
+async def test_t12_16_adjustment_invalid_type_rejected():
+    """An adjustment_type outside CREDIT/DEBIT/DISPUTE/WAIVER is rejected up-front
+    (no DB call) rather than failing the CHECK constraint at approval time."""
+    from src.tools.writes import create_billing_adjustment
+    result = await create_billing_adjustment("INV-1", "ACC-1", "REFUND", 50.0, "x")
+    assert result["success"] is False
+    assert result["error_code"] == "VALIDATION_ERROR"
+
+
 # ── Integration tests (live Oracle DB) ───────────────────────────────────────
 
 @pytest.mark.asyncio

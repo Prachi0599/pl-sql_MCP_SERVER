@@ -25,7 +25,7 @@ _SYSTEM_PROMPT = (
     "You are a billing adjustment agent for the TCL Finance & Billing system. "
     "Extract the adjustment details from the user's request and call "
     "create_billing_adjustment with the correct parameters. "
-    "adjustment_type must be one of: CREDIT, DISPUTE, WAIVER. "
+    "adjustment_type must be one of: CREDIT, DEBIT, DISPUTE, WAIVER. "
     "adjustment_amount must be a positive number. "
     "Always call the tool — never answer without calling it."
 )
@@ -52,7 +52,7 @@ _TOOL_DEFS: list[dict] = [
                     },
                     "adjustment_type": {
                         "type": "string",
-                        "enum": ["CREDIT", "DISPUTE", "WAIVER"],
+                        "enum": ["CREDIT", "DEBIT", "DISPUTE", "WAIVER"],
                         "description": "Type of adjustment",
                     },
                     "adjustment_amount": {

@@ -23,6 +23,10 @@ REAL SEED IDENTIFIERS (use these so questions return data)
   account statuses     : ACTIVE, INACTIVE, SUSPENDED
   bill statuses        : GENERATED, PAID, PENDING, OVERDUE
   source systems       : USAGE_COLLECTOR, NETWORK_GATEWAY, BILLING_ENGINE
+  service req priority  : HIGH, MEDIUM, LOW            (CRITICAL is auto-mapped to HIGH)
+  service req type      : DATA_FIX, BILLING_ADJUSTMENT, RCA, QUERY, OTHER
+  adjustment type       : CREDIT, DEBIT, DISPUTE, WAIVER
+  customer note type    : GENERAL, BILLING, ESCALATION, RCA, TECHNICAL
   packages (9)         : ACCOUNT_PKG, BILLING_PKG, BILLING_ADJUSTMENT_PKG,
                          CUSTOMER_PKG, LOAD_MONITOR_PKG, MCP_SECURITY_PKG,
                          METADATA_PKG, SERVICE_REQUEST_PKG, USAGE_ANALYTICS_PKG
