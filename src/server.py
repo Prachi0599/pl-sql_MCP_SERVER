@@ -494,9 +494,10 @@ async def create_billing_adjustment(invoice_number: str, account_number: str,
 
 @mcp.tool()
 async def ingest_costed_event(account_number: str, event_dtm: str,
-                               in_bits: int, out_bits: int,
-                               speed_mbps: float, bandwidth_mbps: float,
-                               event_type: str, source_system: str,
+                               in_bits: int = 0, out_bits: int = 0,
+                               speed_mbps: float = 0.0, bandwidth_mbps: float = 0.0,
+                               event_type: str = "DATA_USAGE",
+                               source_system: str = "USAGE_COLLECTOR",
                                requested_by: str = "mcp_user") -> dict:
     """Ingest a costed event — returns PENDING approval request."""
     return await _writes.ingest_costed_event(

@@ -51,7 +51,10 @@ _SYSTEM_PROMPT = (
     "- Match codes case-insensitively with UPPER(col)=UPPER('value').\n"
     "- Cap rows: add `FETCH FIRST 50 ROWS ONLY` unless the user asks for a specific N "
     "or an aggregate.\n"
-    "- For 'top N' use ORDER BY <metric> DESC FETCH FIRST N ROWS ONLY.\n\n"
+    "- For 'top N' use ORDER BY <metric> DESC FETCH FIRST N ROWS ONLY.\n"
+    "- If you use UNION / UNION ALL, EVERY branch must SELECT the same number of "
+    "columns in the same order with compatible types and identical column aliases "
+    "(pad with NULL AS col where a branch lacks a value).\n\n"
     "Business keys & joins:\n"
     "- CUSTOMER.CUSTOMER_NUMBER (e.g. CUST000122) is the customer business id; "
     "CUSTOMER_ID is the internal PK.\n"
@@ -186,45 +189,62 @@ async def run(question: str) -> dict:
         schema = await _load_schema(conn)
 
         client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-        try:
-            resp = await client.chat.completions.create(
-                model=_MODEL,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user",
-                     "content": f"Schema:\n{schema}\n\nQuestion: {question}\n\nSQL:"},
-                ],
-                temperature=0,
-            )
-        except Exception as exc:
-            await log_audit(_AGENT, "", question[:100], "READ",
-                            {"question": question[:100]}, "ERROR", str(exc))
-            return {"success": False, "error_code": "OPENAI_ERROR", "message": str(exc)}
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user",
+             "content": f"Schema:\n{schema}\n\nQuestion: {question}\n\nSQL:"},
+        ]
 
-        sql = _clean_sql(resp.choices[0].message.content or "")
-        safe, reason = _is_safe(sql)
-        if not safe:
-            await log_audit(_AGENT, "", question[:100], "READ",
-                            {"question": question[:100], "sql": sql[:300]},
-                            "ERROR", reason)
-            return {"success": False, "error_code": "UNSAFE_QUERY", "message": reason,
-                    "sql": sql}
+        last_err: str | None = None
+        sql = ""
+        for attempt in range(2):  # initial try + one self-correction
+            try:
+                resp = await client.chat.completions.create(
+                    model=_MODEL, messages=messages, temperature=0)
+            except Exception as exc:
+                await log_audit(_AGENT, "", question[:100], "READ",
+                                {"question": question[:100]}, "ERROR", str(exc))
+                return {"success": False, "error_code": "OPENAI_ERROR",
+                        "message": str(exc)}
 
-        capped = f"SELECT * FROM (\n{sql}\n) WHERE ROWNUM <= {_MAX_ROWS}"
-        try:
-            data = await _exec(conn, capped)
-        except Exception as exc:
-            await log_audit(_AGENT, "", question[:100], "READ",
-                            {"question": question[:100], "sql": sql[:300]},
-                            "ERROR", str(exc))
-            err = map_oracle_error(exc)
-            err["sql"] = sql
-            return err
+            sql = _clean_sql(resp.choices[0].message.content or "")
+            safe, reason = _is_safe(sql)
+            if not safe:
+                await log_audit(_AGENT, "", question[:100], "READ",
+                                {"question": question[:100], "sql": sql[:300]},
+                                "ERROR", reason)
+                return {"success": False, "error_code": "UNSAFE_QUERY",
+                        "message": reason, "sql": sql}
 
-        await log_audit(_AGENT, "", question[:100], "READ",
-                        {"question": question[:100], "sql": sql[:300],
-                         "row_count": len(data)}, "SUCCESS")
-        return {"success": True, "question": question, "sql": sql,
-                "data": data, "row_count": len(data)}
+            capped = f"SELECT * FROM (\n{sql}\n) WHERE ROWNUM <= {_MAX_ROWS}"
+            try:
+                data = await _exec(conn, capped)
+            except Exception as exc:
+                last_err = str(exc)
+                if attempt == 0:
+                    # Feed the error back and ask GPT-4o to correct the SQL once.
+                    messages.append({"role": "assistant", "content": sql})
+                    messages.append({
+                        "role": "user",
+                        "content": (f"That query failed with this Oracle error:\n{last_err}\n"
+                                    "Return a corrected single read-only SELECT that fixes "
+                                    "it. Output only the SQL."),
+                    })
+                    continue
+                await log_audit(_AGENT, "", question[:100], "READ",
+                                {"question": question[:100], "sql": sql[:300]},
+                                "ERROR", last_err)
+                err = map_oracle_error(exc)
+                err["sql"] = sql
+                return err
+
+            await log_audit(_AGENT, "", question[:100], "READ",
+                            {"question": question[:100], "sql": sql[:300],
+                             "row_count": len(data)}, "SUCCESS")
+            return {"success": True, "question": question, "sql": sql,
+                    "data": data, "row_count": len(data)}
+
+        return {"success": False, "error_code": "SQL_ERROR",
+                "message": last_err or "Query failed", "sql": sql}
     finally:
         await conn.close()

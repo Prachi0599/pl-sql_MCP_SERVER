@@ -445,8 +445,17 @@ _TOOL_DEFS: list[dict] = [
 ]
 
 async def _dispatch(name: str, args: dict) -> dict:
-    fn = getattr(_writes, name)
-    return await fn(**args)
+    fn = getattr(_writes, name, None)
+    if fn is None or not callable(fn):
+        return {"success": False, "error_code": "UNKNOWN_TOOL",
+                "message": f"Unknown write tool: {name}"}
+    try:
+        return await fn(**args)
+    except TypeError as exc:
+        # GPT-4o omitted a required argument (or passed an unexpected one).
+        return {"success": False, "error_code": "INVALID_ARGS",
+                "message": (f"Could not perform '{name}' - some required details "
+                            f"were missing or invalid ({exc}).")}
 
 
 async def run(question: str) -> dict:
