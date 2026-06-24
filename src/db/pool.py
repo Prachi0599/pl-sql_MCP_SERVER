@@ -19,6 +19,12 @@ _pool: oracledb.AsyncConnectionPool | None = None
 # loop change and transparently recreate the pool.
 _pool_loop: asyncio.AbstractEventLoop | None = None
 
+# Optional dedicated read-only pool, used by the SQL read agent so its generated
+# queries run under a DB-enforced read-only account (SELECT-only privileges).
+# Falls back to the main pool when DB_READONLY_USER is not configured.
+_ro_pool: oracledb.AsyncConnectionPool | None = None
+_ro_pool_loop: asyncio.AbstractEventLoop | None = None
+
 
 def _current_loop() -> asyncio.AbstractEventLoop | None:
     try:
@@ -57,12 +63,56 @@ async def get_connection() -> oracledb.AsyncConnection:
     return await pool.acquire()
 
 
-async def close_pool() -> None:
-    global _pool, _pool_loop
-    if _pool is not None:
+def _readonly_configured() -> bool:
+    return bool(os.getenv("DB_READONLY_USER"))
+
+
+def get_readonly_pool() -> oracledb.AsyncConnectionPool | None:
+    """Return the read-only pool, or None if no read-only user is configured."""
+    global _ro_pool, _ro_pool_loop
+    if not _readonly_configured():
+        return None
+    loop = _current_loop()
+    if (_ro_pool is not None and _ro_pool_loop is not None
+            and loop is not None and _ro_pool_loop is not loop):
         try:
-            await _pool.close(force=True)
+            _ro_pool.close(force=True)
         except Exception:
             pass
-        _pool = None
-        _pool_loop = None
+        _ro_pool = None
+        _ro_pool_loop = None
+    if _ro_pool is None:
+        _ro_pool = oracledb.create_pool_async(
+            user=os.getenv("DB_READONLY_USER", ""),
+            password=os.getenv("DB_READONLY_PASSWORD", ""),
+            dsn=os.getenv("DB_CONNECT_STRING", ""),
+            min=1,
+            max=5,
+            increment=1,
+        )
+        _ro_pool_loop = loop
+    return _ro_pool
+
+
+async def get_readonly_connection() -> oracledb.AsyncConnection:
+    """Acquire a read-only connection. Falls back to the main (read/write) pool
+    when no dedicated read-only user is configured (DB_READONLY_USER unset)."""
+    pool = get_readonly_pool()
+    if pool is None:
+        return await get_connection()
+    return await pool.acquire()
+
+
+async def close_pool() -> None:
+    global _pool, _pool_loop, _ro_pool, _ro_pool_loop
+    for attr in ("_pool", "_ro_pool"):
+        p = globals()[attr]
+        if p is not None:
+            try:
+                await p.close(force=True)
+            except Exception:
+                pass
+    _pool = None
+    _pool_loop = None
+    _ro_pool = None
+    _ro_pool_loop = None

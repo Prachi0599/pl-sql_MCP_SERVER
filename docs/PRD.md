@@ -353,6 +353,13 @@ identifies the domain, and routes to the correct master agent.
 > columns (statuses, types, flags, currencies). `read_master_agent` also uses it
 > as a **failure fallback**: if a specialized data agent hard-fails (e.g. selects
 > no tool), the question is retried through `sql_read_agent`.
+>
+> **DB-enforced read-only (optional).** When `DB_READONLY_USER` is configured
+> (create it with `sql/create_readonly_user.sql`), the SQL agent runs every
+> generated query through a dedicated account that holds only CREATE SESSION +
+> SELECT on MCP_APP — so any write/DDL fails at the database (ORA-01031),
+> independent of statement validation. Unset = transparent fallback to the main
+> pool.
 
 #### Under READ MASTER (8)
 

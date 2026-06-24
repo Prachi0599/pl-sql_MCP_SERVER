@@ -87,6 +87,30 @@ OPENAI_MODEL=gpt-4o
 > `.env` is gitignored — your secrets never get committed. `.env.example` is the
 > safe template (placeholder key only).
 
+### Optional but recommended: a read-only DB user for the SQL agent
+
+The universal `sql_read_agent` generates ad-hoc `SELECT`s. By default it runs
+them as `DB_USER` and relies on statement validation (SELECT-only) to stay safe.
+For a **database-enforced** guarantee, create a dedicated read-only account:
+
+```bash
+# run as SYSTEM / a DBA, against the PDB that holds MCP_APP (e.g. FREEPDB1):
+sqlplus system@localhost:1521/FREEPDB1 @sql/create_readonly_user.sql
+```
+
+Edit `sql/create_readonly_user.sql` first to set a real password, then add the
+matching values to `.env`:
+
+```
+DB_READONLY_USER=MCP_RO
+DB_READONLY_PASSWORD=your-readonly-password-here
+```
+
+The agent then runs every generated query as `MCP_RO`, which only has
+`CREATE SESSION` + `SELECT` on `MCP_APP` — so any INSERT/UPDATE/DELETE/DDL fails
+at the database (ORA-01031). If these vars are unset, the agent transparently
+falls back to the main pool (no behavior change).
+
 ---
 
 ## 4. Running it

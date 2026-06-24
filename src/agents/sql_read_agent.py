@@ -23,7 +23,7 @@ import re
 
 from openai import AsyncOpenAI
 
-from src.db.pool import get_connection
+from src.db.pool import get_readonly_connection
 from src.utils.audit import log_audit
 from src.utils.errors import map_oracle_error
 
@@ -181,7 +181,7 @@ async def run(question: str) -> dict:
 
     Returns {success, question, sql, data:[...], row_count} or an error dict.
     """
-    conn = await get_connection()
+    conn = await get_readonly_connection()
     try:
         schema = await _load_schema(conn)
 
