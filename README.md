@@ -188,6 +188,11 @@ python -m pytest tests/ -m "not integration" -q
 Integration tests auto-skip if `DB_USER` / `DB_CONNECT_STRING` are not set, so the
 unit suite is safe to run anywhere.
 
+**Manual validation:** [`docs/VALIDATION_QUESTIONS.md`](docs/VALIDATION_QUESTIONS.md)
+is a 25-question script (reads, schema, RCA/insight, writes, no-op/duplicate,
+approvals) you can type into `python chat.py` to confirm the assistant answers
+every kind of question correctly.
+
 ---
 
 ## 6. Validation cookbook — commands + expected output

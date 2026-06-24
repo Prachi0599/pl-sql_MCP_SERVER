@@ -77,21 +77,72 @@ async def _exec(conn, sql: str, params: list | None = None) -> list[dict]:
 
 
 async def _load_schema(conn) -> str:
-    """Build a compact 'TABLE(col, col, ...)' description of the MCP_APP schema."""
+    """Build a rich schema description: columns, foreign keys, and the real
+    distinct values of low-cardinality 'enum' columns. Cached per process so the
+    generated SQL is accurate (correct joins and correct status/code values)."""
     global _schema_cache
     if _schema_cache is not None:
         return _schema_cache
-    rows = await _exec(conn, """
+
+    # 1. Columns per table
+    cols_rows = await _exec(conn, """
         SELECT TABLE_NAME, COLUMN_NAME
         FROM   ALL_TAB_COLUMNS
         WHERE  OWNER = 'MCP_APP'
         ORDER BY TABLE_NAME, COLUMN_ID
     """)
     tables: dict[str, list[str]] = {}
-    for r in rows:
+    for r in cols_rows:
         tables.setdefault(r["table_name"], []).append(r["column_name"])
-    _schema_cache = "\n".join(
+    tables_block = "\n".join(
         f"{t}({', '.join(cols)})" for t, cols in sorted(tables.items())
+    )
+
+    # 2. Foreign keys (child.col -> parent)
+    fk_rows = await _exec(conn, """
+        SELECT ac.TABLE_NAME, acc.COLUMN_NAME, ac2.TABLE_NAME AS ref_table
+        FROM   ALL_CONSTRAINTS ac
+        JOIN   ALL_CONS_COLUMNS acc
+               ON acc.CONSTRAINT_NAME = ac.CONSTRAINT_NAME AND acc.OWNER = ac.OWNER
+        JOIN   ALL_CONSTRAINTS ac2
+               ON ac2.CONSTRAINT_NAME = ac.R_CONSTRAINT_NAME AND ac2.OWNER = ac.OWNER
+        WHERE  ac.OWNER = 'MCP_APP' AND ac.CONSTRAINT_TYPE = 'R'
+        ORDER BY ac.TABLE_NAME, acc.COLUMN_NAME
+    """)
+    fk_block = "\n".join(
+        f"{f['table_name']}.{f['column_name']} -> {f['ref_table']}" for f in fk_rows
+    )
+
+    # 3. Distinct values of low-cardinality enum-like columns
+    cand = await _exec(conn, """
+        SELECT TABLE_NAME, COLUMN_NAME
+        FROM   ALL_TAB_COLUMNS
+        WHERE  OWNER = 'MCP_APP'
+          AND  DATA_TYPE LIKE '%CHAR%'
+          AND (COLUMN_NAME LIKE '%STATUS%' OR COLUMN_NAME LIKE '%TYPE%'
+               OR COLUMN_NAME LIKE '%FLAG%' OR COLUMN_NAME IN
+               ('BILLING_CYCLE','SOURCE_SYSTEM','COUNTRY','CURRENCY_CODE','PRODUCT_TYPE'))
+        ORDER BY TABLE_NAME, COLUMN_NAME
+    """)
+    enum_lines: list[str] = []
+    for c in cand:
+        t, col = c["table_name"], c["column_name"]
+        try:
+            vals = await _exec(
+                conn,
+                f"SELECT DISTINCT {col} AS v FROM MCP_APP.{t} "
+                f"WHERE {col} IS NOT NULL FETCH FIRST 26 ROWS ONLY")
+            values = [str(v["v"]) for v in vals]
+            if 0 < len(values) <= 25:
+                enum_lines.append(f"{t}.{col}: {', '.join(values)}")
+        except Exception:
+            continue
+    enum_block = "\n".join(enum_lines)
+
+    _schema_cache = (
+        f"TABLES (name(columns)):\n{tables_block}\n\n"
+        f"FOREIGN KEYS (child.column -> parent table):\n{fk_block}\n\n"
+        f"COMMON COLUMN VALUES (use these exact values):\n{enum_block}"
     )
     return _schema_cache
 

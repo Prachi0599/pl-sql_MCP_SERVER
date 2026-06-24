@@ -347,6 +347,12 @@ identifies the domain, and routes to the correct master agent.
 > guarantees broad coverage: specific record/field lookups, lists, ids, counts,
 > and ad-hoc filters that no dedicated tool exists for. Also exposed directly as
 > the MCP tool `query_data`.
+>
+> To improve generation accuracy it feeds GPT-4o the live schema **plus** all
+> foreign-key relationships and the real distinct values of low-cardinality
+> columns (statuses, types, flags, currencies). `read_master_agent` also uses it
+> as a **failure fallback**: if a specialized data agent hard-fails (e.g. selects
+> no tool), the question is retried through `sql_read_agent`.
 
 #### Under READ MASTER (8)
 

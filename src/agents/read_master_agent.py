@@ -230,6 +230,23 @@ async def _dispatch(name: str, args: dict) -> dict:
     return await sub.run(args.get("question", ""))
 
 
+# Data-retrieval agents whose empty/failed result should fall back to SQL.
+_DATA_AGENTS = {
+    "customer_read_agent", "billing_read_agent",
+    "usage_read_agent", "operations_read_agent",
+}
+
+
+def _failed(res: dict) -> bool:
+    """True only if a sub-agent could not answer (errored / selected no tool).
+
+    We deliberately do NOT treat a successful-but-empty result as a failure: a
+    specialized agent reporting 'none found' is a valid answer, and falling back
+    to SQL there could replace a correct empty answer with a misleading one. The
+    fallback exists to rescue hard failures (OPENAI_ERROR, NO_TOOL_CALLED, etc.)."""
+    return not (isinstance(res, dict) and res.get("success", False))
+
+
 async def run(question: str) -> dict:
     """
     Route a read question to the appropriate sub-agent via GPT-4o function-calling.
@@ -276,6 +293,14 @@ async def run(question: str) -> dict:
         args = {}
 
     sub_result = await _dispatch(routed_to, args)
+
+    # Safety net: if a specialized data agent could not answer (hard failure),
+    # retry via the universal SQL agent. Only replace when SQL actually succeeds.
+    if routed_to in _DATA_AGENTS and _failed(sub_result):
+        fallback = await sql_read_agent.run(question)
+        if fallback.get("success"):
+            routed_to = "sql_read_agent"
+            sub_result = fallback
 
     await log_audit(
         _AGENT, "", question[:100], "READ",
