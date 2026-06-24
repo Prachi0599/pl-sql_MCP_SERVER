@@ -359,11 +359,13 @@ async def test_t13_08_integration_limit_501_capped(db_conn):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_t13_01_integration_ora_00001_via_duplicate_currency(db_conn):
+async def test_t13_01_integration_duplicate_currency_is_noop(db_conn):
+    """A duplicate currency code is caught up-front by no-op detection and never
+    staged — so no doomed approval request is created.
+
+    (The ORA-00001 unique-constraint mapping on dispatch is still covered by the
+    unit test test_t12_13b_create_currency_approval_maps_ora_00001.)"""
     from src.tools.writes import create_currency
-    from src.tools.approval import approve_request
-    # Use an existing currency code to trigger ORA-00001 on approval dispatch
-    # First, find an existing currency
     from src.tools.approval import _exec
     from src.db.pool import get_connection
     c = await get_connection()
@@ -378,11 +380,6 @@ async def test_t13_01_integration_ora_00001_via_duplicate_currency(db_conn):
     existing_code = rows[0]["currency_code"]
     req = await create_currency(existing_code, "Duplicate Test")
     assert req["success"] is True
-    assert req["status"] == "PENDING"
-
-    # Now approve — dispatch should fail with ORA-00001
-    result = await approve_request(req["request_id"], "test_runner")
-    # Either fails with ORA-00001 (unique constraint) or error code
-    if result.get("success") is False:
-        assert "ORA-" in result.get("error_code", "") or result.get("error_code") == "INTERNAL_ERROR"
-    # If it somehow passed (shouldn't), that's also acceptable for the test setup
+    assert req["status"] == "NO_CHANGE"
+    assert req.get("no_change") is True
+    assert req.get("request_id") is None

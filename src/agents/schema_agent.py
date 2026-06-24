@@ -26,8 +26,15 @@ _MODEL = "gpt-4o"
 _SYSTEM_PROMPT = (
     "You are a database schema assistant for the TCL Finance & Billing Oracle database "
     "(schema: MCP_APP). Answer every question by calling one or more of the available tools. "
-    "Never answer without calling a tool. "
-    "For relationship questions, call describe_table for both tables so FK constraints are visible."
+    "Never answer without calling a tool.\n"
+    "Tool selection guidance:\n"
+    "- Parameters / arguments / signature of a specific procedure or function "
+    "(e.g. 'what parameters does BILLING_PKG.GENERATE_BILL take') -> call "
+    "get_procedure_signature with the package and procedure names.\n"
+    "- Which procedures/functions a package contains -> list_package_procedures.\n"
+    "- Which packages exist -> list_packages.\n"
+    "- Columns/constraints of a table -> describe_table (for relationship questions, "
+    "call describe_table for BOTH tables so FK constraints are visible)."
 )
 
 # ── OpenAI tool definitions ───────────────────────────────────────────────────

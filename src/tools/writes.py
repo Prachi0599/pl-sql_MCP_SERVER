@@ -59,17 +59,19 @@ def _not_found(message: str) -> dict:
     return {"success": False, "error_code": "NOT_FOUND", "message": str(message)}
 
 
+def _no_change_msg(message: str, **extra: Any) -> dict:
+    """Returned by any write tool when the requested change is already satisfied
+    (a no-op / duplicate) — no approval request is created."""
+    return {"success": True, "no_change": True, "status": "NO_CHANGE",
+            "message": message, **extra}
+
+
 def _no_change(label: str, current: Any) -> dict:
-    """Returned by UPDATE tools when the target value already equals the current
-    value — no approval request is created."""
-    return {
-        "success": True,
-        "no_change": True,
-        "status": "NO_CHANGE",
-        "current_value": current,
-        "requested_value": current,
-        "message": f"{label} is already '{current}' - no change needed.",
-    }
+    """Convenience for UPDATE tools: the target value already equals the current."""
+    return _no_change_msg(
+        f"{label} is already '{current}' - no change needed.",
+        current_value=current, requested_value=current,
+    )
 
 
 async def _current_value(conn: oracledb.AsyncConnection, sql: str, params: list):
@@ -103,6 +105,15 @@ async def create_provider(
 
     conn = await get_connection()
     try:
+        existing = await _current_value(
+            conn,
+            "SELECT PROVIDER_CODE FROM MCP_APP.PROVIDER WHERE UPPER(PROVIDER_CODE) = UPPER(:1)",
+            [provider_code])
+        if existing is not None:
+            return _no_change_msg(
+                f"Provider '{provider_code.upper()}' already exists - no change needed.",
+                current_value=existing)
+
         new_val = json.dumps({
             "sql": (
                 "INSERT INTO MCP_APP.PROVIDER "
@@ -566,6 +577,16 @@ async def assign_product_to_account(
         account_id = await resolve_account_number(conn, account_number)
         product_id = await resolve_product_code(conn, product_code)
 
+        existing = await _current_value(conn, """
+            SELECT 1 FROM MCP_APP.CUSTOMER_PRODUCT_DETAILS
+            WHERE ACCOUNT_ID = :1 AND PRODUCT_ID = :2 AND STATUS = 'ACTIVE'
+            FETCH FIRST 1 ROW ONLY
+        """, [account_id, product_id])
+        if existing is not None:
+            return _no_change_msg(
+                f"Product '{product_code}' is already actively assigned to "
+                f"account '{account_number}' - no change needed.")
+
         # Build dynamic SQL for optional date params
         params: list = [customer_id, account_id, product_id]
         if start_date:
@@ -630,7 +651,9 @@ async def terminate_customer_product(
             FETCH FIRST 1 ROW ONLY
         """, [customer_id, product_id])
         if not rows:
-            return _not_found(f"No active product '{product_code}' for '{customer_number}'")
+            return _no_change_msg(
+                f"Product '{product_code}' is not active for customer "
+                f"'{customer_number}' - nothing to terminate.")
 
         cust_product_id = rows[0]["cust_product_id"]
         end_clause = f"TO_DATE(:2, 'YYYY-MM-DD')" if end_date else "SYSDATE"
@@ -950,13 +973,20 @@ async def assign_service_request(
 
     conn = await get_connection()
     try:
+        current = await _current_value(
+            conn,
+            "SELECT ASSIGNED_TO FROM MCP_APP.SERVICE_REQUEST WHERE REQUEST_ID = :1",
+            [int(request_id)])
+        if current is not None and str(current).upper() == assigned_to.upper():
+            return _no_change(f"Service request {request_id} assignee", current)
+
         new_val = json.dumps({"params": [int(request_id), assigned_to]})
         req = await create_approval_request(
             conn,
             package_name="SERVICE_REQUEST_PKG",
             procedure_name="ASSIGN_REQUEST",
             action_type="UPDATE",
-            old_value=json.dumps({"request_id": request_id}),
+            old_value=json.dumps({"request_id": request_id, "old_assignee": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -984,13 +1014,22 @@ async def resolve_service_request(
 
     conn = await get_connection()
     try:
+        current = await _current_value(
+            conn,
+            "SELECT STATUS FROM MCP_APP.SERVICE_REQUEST WHERE REQUEST_ID = :1",
+            [int(request_id)])
+        if current is not None and str(current).upper() in ("RESOLVED", "CLOSED"):
+            return _no_change_msg(
+                f"Service request {request_id} is already {current} - no change needed.",
+                current_value=current)
+
         new_val = json.dumps({"params": [int(request_id), resolution_notes, resolved_by]})
         req = await create_approval_request(
             conn,
             package_name="SERVICE_REQUEST_PKG",
             procedure_name="RESOLVE_REQUEST",
             action_type="UPDATE",
-            old_value=json.dumps({"request_id": request_id}),
+            old_value=json.dumps({"request_id": request_id, "old_status": current}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -1066,6 +1105,15 @@ async def create_currency(
 
     conn = await get_connection()
     try:
+        existing = await _current_value(
+            conn,
+            "SELECT CURRENCY_CODE FROM MCP_APP.CURRENCY WHERE UPPER(CURRENCY_CODE) = UPPER(:1)",
+            [currency_code])
+        if existing is not None:
+            return _no_change_msg(
+                f"Currency '{currency_code.upper()}' already exists - no change needed.",
+                current_value=existing)
+
         new_val = json.dumps({
             "sql": (
                 "INSERT INTO MCP_APP.CURRENCY "

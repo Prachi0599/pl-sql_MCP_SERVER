@@ -115,10 +115,16 @@ you > yes
 
 **How writes behave (conversational approval):**
 1. You ask for a change in plain English.
-2. The system checks the current value. If it already matches, you're told
-   "already X - no change needed" and **nothing is staged**.
-3. Otherwise you're shown exactly what will change (**from X to Y**) and asked to
-   confirm. Reply **`yes`** to approve and apply, or **`no`** to cancel.
+2. The system checks first and short-circuits if there's nothing to do — across
+   **all** write types, not just updates:
+   - status/flag/email update already at the target value -> "already X - no change needed"
+   - create of a currency/provider that already exists -> "already exists - no change needed"
+   - product already actively assigned, or already terminated -> "no change needed"
+   - service request already assigned to that user / already resolved -> "no change needed"
+   In every such case **nothing is staged**.
+3. Otherwise you're shown exactly what will change (**from X to Y**, or what will
+   be created) and asked to confirm. Reply **`yes`** to approve and apply, or
+   **`no`** to cancel.
 
 **Chat slash-commands** (optional shortcuts)
 
@@ -212,14 +218,17 @@ you > List all PL/SQL packages in the schema
 **Expected:** a plain-English reply naming the **9** packages (ACCOUNT_PKG,
 BILLING_PKG, …) and noting they're all VALID. Use `/raw` to see the underlying JSON.
 
-### 6.4 No-op detection (write that changes nothing)
+### 6.4 No-op / duplicate detection (write that changes nothing)
 
-In `python chat.py` (ACC000123 is ACTIVE in seed data):
+Applies to every write type. In `python chat.py` (ACC000123 is ACTIVE, USD exists):
 ```
 you > set account ACC000123 status to ACTIVE
+  Account ACC000123 status is already 'ACTIVE' - no change needed.
+
+you > create a new currency USD called US Dollar
+  Currency 'USD' already exists - no change needed.
 ```
-**Expected:** `Account ACC000123 status is already 'ACTIVE' - no change needed.`
-**No approval request is created.**
+**No approval request is created in either case.**
 
 ### 6.5 Natural-language WRITE → conversational approval
 
