@@ -162,8 +162,8 @@ async def update_provider_status(
             return _no_change(f"Provider {provider_code} status", current)
 
         new_val = json.dumps({
-            "sql": "UPDATE MCP_APP.PROVIDER SET STATUS = :2 WHERE PROVIDER_ID = :1",
-            "params": [provider_id, target],
+            "sql": "UPDATE MCP_APP.PROVIDER SET STATUS = :1 WHERE PROVIDER_ID = :2",
+            "params": [target, provider_id],
         })
         req = await create_approval_request(
             conn,
@@ -402,8 +402,8 @@ async def update_contact_email(
             return _no_change(f"Contact {contact_id} email", current)
 
         new_val = json.dumps({
-            "sql": "UPDATE MCP_APP.CONTACT SET EMAIL = :2 WHERE CONTACT_ID = :1",
-            "params": [int(contact_id), new_email],
+            "sql": "UPDATE MCP_APP.CONTACT SET EMAIL = :1 WHERE CONTACT_ID = :2",
+            "params": [new_email, int(contact_id)],
         })
         req = await create_approval_request(
             conn,
@@ -534,8 +534,8 @@ async def set_account_billable(
             return _no_change(f"Account {account_number} billable flag", current)
 
         new_val = json.dumps({
-            "sql": "UPDATE MCP_APP.ACCOUNT_DETAILS SET BILLABLE_FLAG = :2 WHERE ACCOUNT_ID = :1",
-            "params": [account_id, flag],
+            "sql": "UPDATE MCP_APP.ACCOUNT_DETAILS SET BILLABLE_FLAG = :1 WHERE ACCOUNT_ID = :2",
+            "params": [flag, account_id],
         })
         req = await create_approval_request(
             conn,
@@ -582,8 +582,8 @@ async def update_account_currency(
             return _no_change(f"Account {account_number} currency", current)
 
         new_val = json.dumps({
-            "sql": "UPDATE MCP_APP.ACCOUNT SET CURRENCY_ID = :2 WHERE ACCOUNT_ID = :1",
-            "params": [account_id, currency_id],
+            "sql": "UPDATE MCP_APP.ACCOUNT SET CURRENCY_ID = :1 WHERE ACCOUNT_ID = :2",
+            "params": [currency_id, account_id],
         })
         req = await create_approval_request(
             conn,
@@ -704,16 +704,22 @@ async def terminate_customer_product(
                 f"'{customer_number}' - nothing to terminate.")
 
         cust_product_id = rows[0]["cust_product_id"]
-        end_clause = f"TO_DATE(:2, 'YYYY-MM-DD')" if end_date else "SYSDATE"
-        params = [cust_product_id]
+        # Bind placeholders in ascending appearance order (END_DATE clause comes
+        # before the WHERE), since oracledb binds a list by position-of-appearance.
         if end_date:
-            params.append(end_date)
+            end_clause = "TO_DATE(:1, 'YYYY-MM-DD')"
+            where_bind = ":2"
+            params = [end_date, cust_product_id]
+        else:
+            end_clause = "SYSDATE"
+            where_bind = ":1"
+            params = [cust_product_id]
 
         new_val = json.dumps({
             "sql": (
                 "UPDATE MCP_APP.CUSTOMER_PRODUCT_DETAILS "
                 f"SET STATUS='TERMINATED', END_DATE={end_clause} "
-                "WHERE CUST_PRODUCT_ID = :1"
+                f"WHERE CUST_PRODUCT_ID = {where_bind}"
             ),
             "params": params,
         })

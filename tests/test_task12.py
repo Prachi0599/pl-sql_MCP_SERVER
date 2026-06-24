@@ -460,3 +460,46 @@ async def test_t12_02_integration_unknown_company_code(db_conn):
     result = await create_customer("Test Corp", "INVALID-CO-XXXX", "ENTERPRISE")
     assert result["success"] is False
     assert result["error_code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_t12_14_integration_direct_sql_update_bind_order(db_conn):
+    """Regression: a direct-SQL UPDATE must bind correctly when APPROVED.
+
+    python-oracledb binds a positional list by placeholder APPEARANCE order, not
+    by the :N number, so `SET col = :2 WHERE id = :1` with [id, value] silently
+    reversed the binds (ORA-01722, or wrong-row corruption). This drives the full
+    create -> approve -> verify -> revert path for update_provider_status."""
+    from src.tools.writes import update_provider_status
+    from src.tools.approval import approve_request, _exec
+    from src.db.pool import get_connection
+
+    conn = await get_connection()
+    try:
+        rows = await _exec(conn,
+            "SELECT PROVIDER_CODE, STATUS FROM MCP_APP.PROVIDER FETCH FIRST 1 ROW ONLY")
+    finally:
+        await conn.close()
+    if not rows:
+        pytest.skip("No providers to test")
+    code, orig = rows[0]["provider_code"], rows[0]["status"]
+    target = "INACTIVE" if orig == "ACTIVE" else "ACTIVE"
+
+    req = await update_provider_status(code, target, "pytest")
+    assert req["success"] is True and req["status"] == "PENDING"
+    appr = await approve_request(req["request_id"], "pytest")
+    assert appr["success"] is True, f"approve failed: {appr.get('message')}"
+
+    conn = await get_connection()
+    try:
+        chk = await _exec(conn,
+            "SELECT STATUS FROM MCP_APP.PROVIDER WHERE PROVIDER_CODE = :1", [code])
+        assert chk[0]["status"] == target, "status column was not updated correctly"
+    finally:
+        await conn.close()
+
+    # revert to the original status
+    rev = await update_provider_status(code, orig, "pytest")
+    if rev.get("request_id"):
+        await approve_request(rev["request_id"], "pytest")
