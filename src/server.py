@@ -1,12 +1,23 @@
 """TCL Finance & Billing MCP Server — entry point.
 
 Tools are registered here as each task is implemented.
-Run with: python -m src.server
+
+Run either way (both work):
+    python -m src.server          # run as a module from the project root
+    python src/server.py          # run the file directly (path bootstrap below)
 """
 import asyncio
 import logging
 import os
 import signal
+import sys
+
+# ── Path bootstrap ────────────────────────────────────────────────────────────
+# Allow running this file directly (`python src/server.py`) by ensuring the
+# project root is importable so the absolute `src.*` imports below resolve.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
@@ -533,6 +544,178 @@ async def schema_agent(question: str) -> dict:
     """Answer natural language questions about the MCP_APP Oracle schema using GPT-4o.
     Routes to list_packages, describe_table, get_procedure_signature, etc."""
     return await _schema_agent_mod.run(question)
+
+
+# ── Task 05: Groups A & J — Reference & Lookup Read Tools ────────────────────
+from src.tools import reference as _reference  # noqa: E402
+
+@mcp.tool()
+async def get_providers(status: str = "ACTIVE") -> dict:
+    """List providers, filtered by status ('ACTIVE', 'INACTIVE', or 'ALL')."""
+    return await _reference.get_providers(status)
+
+@mcp.tool()
+async def get_provider_details(provider_code: str) -> dict:
+    """Return a single provider by its code."""
+    return await _reference.get_provider_details(provider_code)
+
+@mcp.tool()
+async def get_invoicing_companies(country: str = "", status: str = "ACTIVE") -> dict:
+    """List invoicing companies, optionally filtered by country and status."""
+    return await _reference.get_invoicing_companies(country or None, status)
+
+@mcp.tool()
+async def get_currencies() -> dict:
+    """List all supported currencies."""
+    return await _reference.get_currencies()
+
+@mcp.tool()
+async def get_currency_by_code(currency_code: str) -> dict:
+    """Return a single currency by its code (e.g. USD)."""
+    return await _reference.get_currency_by_code(currency_code)
+
+@mcp.tool()
+async def get_customer_types() -> dict:
+    """List all customer types (Enterprise, SMB, Government, etc.)."""
+    return await _reference.get_customer_types()
+
+
+# ── Task 06: Group B — Customer Read Tools ────────────────────────────────────
+from src.tools import customer as _customer  # noqa: E402
+
+@mcp.tool()
+async def search_customers(name: str = "", status: str = "",
+                           limit: int = 50, offset: int = 0) -> dict:
+    """Search customers by name (case-insensitive LIKE), with pagination."""
+    return await _customer.search_customers(name or None, status or None, limit, offset)
+
+@mcp.tool()
+async def get_customer_by_number(customer_number: str) -> dict:
+    """Return a single customer joined with type and invoicing company."""
+    return await _customer.get_customer_by_number(customer_number)
+
+@mcp.tool()
+async def get_customer_360(customer_number: str) -> dict:
+    """Return a full customer profile: addresses, contacts, accounts, products, latest bill."""
+    return await _customer.get_customer_360(customer_number)
+
+@mcp.tool()
+async def get_customers_by_company(company_code: str, status: str = "ACTIVE",
+                                   limit: int = 50) -> dict:
+    """Return customers belonging to an invoicing company."""
+    return await _customer.get_customers_by_company(company_code, status, limit)
+
+@mcp.tool()
+async def get_customer_summary_stats() -> dict:
+    """Return customer totals: total, active, inactive, and breakdown by type."""
+    return await _customer.get_customer_summary_stats()
+
+
+# ── Tasks 15-23: Higher-level agents exposed as natural-language MCP tools ────
+from src.agents import (  # noqa: E402
+    intent_router as _intent_router,
+    read_master_agent as _read_master,
+    write_master_agent as _write_master,
+    customer_read_agent as _customer_read_agent,
+    billing_read_agent as _billing_read_agent,
+    usage_read_agent as _usage_read_agent,
+    operations_read_agent as _operations_read_agent,
+    rca_agent as _rca_agent,
+    insight_agent as _insight_agent,
+    dml_agent as _dml_agent,
+    approval_agent as _approval_agent,
+    onboarding_agent as _onboarding_agent,
+    billing_run_agent as _billing_run_agent,
+    adjustment_agent as _adjustment_agent,
+)
+
+@mcp.tool()
+async def ask(question: str) -> dict:
+    """PRIMARY ENTRY POINT. Ask anything in plain English about TCL Finance &
+    Billing. The intent router classifies it as READ or WRITE and routes to the
+    correct master agent and sub-agent. Use this for natural-language questions."""
+    return await _intent_router.run(question)
+
+@mcp.tool()
+async def read_master_agent(question: str) -> dict:
+    """Route a read/lookup/analysis question to the correct read sub-agent."""
+    return await _read_master.run(question)
+
+@mcp.tool()
+async def write_master_agent(question: str) -> dict:
+    """Route a write/DML request to the correct write sub-agent (approval-gated)."""
+    return await _write_master.run(question)
+
+@mcp.tool()
+async def customer_read_agent(question: str) -> dict:
+    """Answer customer-centric questions (lookups, contacts, addresses, products)."""
+    return await _customer_read_agent.run(question)
+
+@mcp.tool()
+async def billing_read_agent(question: str) -> dict:
+    """Answer billing questions (invoices, revenue, unpaid bills, adjustments)."""
+    return await _billing_read_agent.run(question)
+
+@mcp.tool()
+async def usage_read_agent(question: str) -> dict:
+    """Answer usage/analytics questions (events, bandwidth, anomalies, failures)."""
+    return await _usage_read_agent.run(question)
+
+@mcp.tool()
+async def operations_read_agent(question: str) -> dict:
+    """Answer operations questions (load status, service requests, inactive entities)."""
+    return await _operations_read_agent.run(question)
+
+@mcp.tool()
+async def rca_agent(customer_number: str) -> dict:
+    """Run a full automated root-cause analysis for a customer (chains 7 tools + GPT-4o)."""
+    return await _rca_agent.run(customer_number)
+
+@mcp.tool()
+async def insight_agent(question: str) -> dict:
+    """Generate an executive financial narrative (revenue, products, payments + GPT-4o)."""
+    return await _insight_agent.run(question)
+
+@mcp.tool()
+async def dml_agent(question: str) -> dict:
+    """Handle a single natural-language write op via the approval workflow."""
+    return await _dml_agent.run(question)
+
+@mcp.tool()
+async def approval_agent(question: str) -> dict:
+    """Manage the approval queue in natural language (list / approve / reject)."""
+    return await _approval_agent.run(question)
+
+@mcp.tool()
+async def onboarding_agent(customer_name: str, company_code: str,
+                           customer_type_code: str, address_type: str,
+                           address_line1: str, city: str, country: str,
+                           contact_name: str, designation: str, email: str,
+                           account_name: str, currency_code: str,
+                           product_code: str, phone_number: str = "",
+                           start_date: str = "",
+                           requested_by: str = "mcp_user") -> dict:
+    """Full customer onboarding — stages 5 approval requests (customer → address →
+    contact → account → product) in dependency order. Takes structured fields."""
+    return await _onboarding_agent.run({
+        "customer_name": customer_name, "company_code": company_code,
+        "customer_type_code": customer_type_code, "address_type": address_type,
+        "address_line1": address_line1, "city": city, "country": country,
+        "contact_name": contact_name, "designation": designation, "email": email,
+        "account_name": account_name, "currency_code": currency_code,
+        "product_code": product_code, "phone_number": phone_number,
+        "start_date": start_date, "requested_by": requested_by,
+    })
+
+@mcp.tool()
+async def billing_run_agent(billing_month: str, requested_by: str = "mcp_user") -> dict:
+    """Execute the monthly billing run for all eligible MONTHLY-cycle accounts."""
+    return await _billing_run_agent.run(billing_month, requested_by)
+
+@mcp.tool()
+async def adjustment_agent(question: str) -> dict:
+    """Create a billing adjustment (CREDIT / DISPUTE / WAIVER) via the approval workflow."""
+    return await _adjustment_agent.run(question)
 
 
 if __name__ == "__main__":

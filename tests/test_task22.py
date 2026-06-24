@@ -491,8 +491,8 @@ async def test_t22_01_integration_billing_run(db_conn):
 async def test_t22_09_integration_adjustment_credit(db_conn):
     from src.agents.adjustment_agent import run
     result = await run(
-        "apply a $500 CREDIT adjustment to invoice INV-000001 "
-        "for account ACC-000001 due to billing error"
+        "apply a $500 CREDIT adjustment to invoice INV00000123 "
+        "for account ACC000123 due to billing error"
     )
     assert result["success"] is True
     assert result["action"] == "create_billing_adjustment"

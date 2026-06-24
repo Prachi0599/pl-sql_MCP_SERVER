@@ -504,7 +504,7 @@ async def test_t17_01_integration_unknown_customer(db_conn):
 @pytest.mark.integration
 async def test_t17_02_integration_rca_full_flow(db_conn):
     from src.agents.rca_agent import run
-    result = await run("CUST-001")
+    result = await run("CUST000122")
     assert result["success"] is True
     assert "customer_profile" in result
     assert isinstance(result["billing_issues"], list)

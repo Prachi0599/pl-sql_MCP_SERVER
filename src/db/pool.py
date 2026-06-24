@@ -4,6 +4,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Fetch CLOB/BLOB columns as plain str/bytes instead of LOB locator objects.
+# Without this, CLOB columns such as MCP_APPROVAL_REQUEST.NEW_VALUE come back as
+# unread AsyncLOB objects — breaking JSON serialization in read tools and
+# json.loads() during approval DML dispatch.
+oracledb.defaults.fetch_lobs = False
+
 _pool: oracledb.AsyncConnectionPool | None = None
 
 

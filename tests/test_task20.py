@@ -433,7 +433,7 @@ async def test_t20_01_integration_dml_create_customer(db_conn):
     from src.agents.dml_agent import run
     result = await run(
         "create a new customer named 'Integration Test Corp' "
-        "with company code ACME and customer type CORP"
+        "with company code INV0001 and customer type CORP"
     )
     assert result["success"] is True
     assert result["action"] == "create_customer"
