@@ -146,6 +146,34 @@ async def test_t12_05_update_account_status_resolves_account():
     acc_mock.assert_awaited_once()
 
 
+# ── T12-05b: update_account_currency no-op + staged change ────────────────────
+
+@pytest.mark.asyncio
+async def test_t12_05b_update_account_currency_noop_when_same():
+    with _stack(exec_rows=[[{"currency_code": "USD"}]],
+                resolvers={"resolve_account_number": 42,
+                           "resolve_currency_code": 3})[0]:
+        from src.tools.writes import update_account_currency
+        result = await update_account_currency("ACC-001", "USD")
+    assert result["success"] is True
+    assert result["status"] == "NO_CHANGE"
+    assert result["no_change"] is True
+    assert result.get("request_id") is None
+
+
+@pytest.mark.asyncio
+async def test_t12_05c_update_account_currency_stages_when_different():
+    with _stack(exec_rows=[[{"currency_code": "USD"}]],
+                resolvers={"resolve_account_number": 42,
+                           "resolve_currency_code": 7})[0]:
+        from src.tools.writes import update_account_currency
+        result = await update_account_currency("ACC-001", "INR")
+    assert result["success"] is True
+    assert result["status"] == "PENDING"
+    assert result["current_value"] == "USD"
+    assert result["requested_value"] == "INR"
+
+
 # ── T12-06: create_bill NEW_VALUE has post_query for INVOICE_NUMBER ───────────
 
 @pytest.mark.asyncio

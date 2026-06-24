@@ -444,6 +444,13 @@ async def set_account_billable(account_number: str, billable_flag: str,
     return await _writes.set_account_billable(account_number, billable_flag, requested_by)
 
 @mcp.tool()
+async def update_account_currency(account_number: str, currency_code: str,
+                                  requested_by: str = "mcp_user") -> dict:
+    """Change an account's billing currency — returns PENDING approval request,
+    or NO_CHANGE if it already uses that currency."""
+    return await _writes.update_account_currency(account_number, currency_code, requested_by)
+
+@mcp.tool()
 async def assign_product_to_account(customer_number: str, account_number: str,
                                      product_code: str,
                                      start_date: str = "", end_date: str = "",
@@ -640,6 +647,14 @@ async def ask(question: str) -> dict:
 async def read_master_agent(question: str) -> dict:
     """Route a read/lookup/analysis question to the correct read sub-agent."""
     return await _read_master.run(question)
+
+@mcp.tool()
+async def query_data(question: str) -> dict:
+    """Answer ANY read question about the data by generating and running a safe,
+    read-only SQL SELECT against MCP_APP (capped, audited). Use for specific record
+    lookups, lists, ids, counts, and ad-hoc filters."""
+    from src.agents import sql_read_agent as _sql_agent
+    return await _sql_agent.run(question)
 
 @mcp.tool()
 async def write_master_agent(question: str) -> dict:

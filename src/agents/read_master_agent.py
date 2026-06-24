@@ -23,6 +23,7 @@ from src.agents import (
     operations_read_agent,
     rca_agent,
     schema_agent,
+    sql_read_agent,
     usage_read_agent,
 )
 from src.utils.audit import log_audit
@@ -50,11 +51,19 @@ _SYSTEM_PROMPT = (
     "- schema_agent: DATABASE STRUCTURE — tables, columns, packages, procedures, sequences, "
     "indexes — 'what tables/packages exist', 'describe table', 'parameters of procedure X'.\n"
     "- insight_agent: EXECUTIVE financial narratives across the whole business — total "
-    "revenue trends, revenue by product type, period/quarterly summaries, top-line KPIs.\n\n"
+    "revenue trends, revenue by product type, period/quarterly summaries, top-line KPIs.\n"
+    "- sql_read_agent: GENERAL-PURPOSE data lookups — any specific record, field, list, "
+    "id, count, or ad-hoc filter that the agents above don't squarely cover. Examples: "
+    "'show account details for ACC000123', 'list all account numbers', 'top 5 customer "
+    "ids', 'what currency does customer CUST000122 use', 'which accounts are INACTIVE'. "
+    "When unsure which read agent fits, use sql_read_agent — it can answer anything from "
+    "the data.\n\n"
     "Disambiguation:\n"
     "- Company-wide revenue / executive summary -> insight_agent; one account's bills -> billing_read_agent.\n"
     "- 'How many customers ...' -> customer_read_agent (it owns customer statistics).\n"
     "- Investigating a specific customer's problem -> rca_agent; a plain customer lookup -> customer_read_agent.\n"
+    "- A specific account/bill/record field lookup, an arbitrary list/filter, or anything "
+    "not clearly owned above -> sql_read_agent.\n"
     "Always call exactly one tool. Never answer without calling a tool."
 )
 
@@ -65,6 +74,7 @@ _AGENT_MAP = {
     "usage_read_agent":       usage_read_agent,
     "operations_read_agent":  operations_read_agent,
     "insight_agent":          insight_agent,
+    "sql_read_agent":         sql_read_agent,
 }
 
 _TOOL_DEFS: list[dict] = [
@@ -180,6 +190,26 @@ _TOOL_DEFS: list[dict] = [
             "description": (
                 "Route to the insight agent for executive-level financial reports: "
                 "revenue trends, product performance, outstanding payments, period summaries."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The user's question"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sql_read_agent",
+            "description": (
+                "General-purpose data query agent. Use for any specific record, field, "
+                "list, id, count, or ad-hoc filter not squarely owned by the other read "
+                "agents (e.g. account details by number, all account numbers, top-N ids, "
+                "a customer's currency). The safe fallback that can answer anything from "
+                "the data."
             ),
             "parameters": {
                 "type": "object",

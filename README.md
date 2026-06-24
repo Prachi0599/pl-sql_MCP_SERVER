@@ -21,10 +21,11 @@ agent stack, calls the right Oracle packages/SQL, and returns structured JSON.
 |---|---|---|
 | **Atomic tools** (~80) | One Oracle call each — direct SQL or a PL/SQL package proc. Every call is audited. | `src/tools/*.py` |
 | **ID resolvers** | Translate business codes (`CUST000122`, `USD`) → numeric IDs Oracle procs expect. | `src/db/resolvers.py` |
-| **Sub-agents** (12) | Chain multiple tools for one job (e.g. RCA chains 7 tools + GPT-4o). | `src/agents/*_agent.py` |
+| **Sub-agents** (13) | Chain multiple tools for one job (e.g. RCA chains 7 tools + GPT-4o). | `src/agents/*_agent.py` |
+| **SQL read agent** | Universal fallback — answers *any* read question by generating a safe, read-only `SELECT` (capped + audited). | `src/agents/sql_read_agent.py` |
 | **Master agents** (2) | `read_master_agent` / `write_master_agent` — GPT-4o picks the right sub-agent. | `src/agents/*_master_agent.py` |
 | **Intent router** (1) | Top entry point — classifies READ vs WRITE, routes to a master. | `src/agents/intent_router.py` |
-| **MCP server** | Registers all 80 tools + 15 agents as MCP tools. | `src/server.py` |
+| **MCP server** | Registers ~82 tools + 16 agents as MCP tools (incl. `ask` and `query_data`). | `src/server.py` |
 | **Chat client** | Interactive REPL to talk to the stack yourself. | `chat.py` |
 
 ### Request flow
@@ -198,7 +199,7 @@ Use these to confirm the system is healthy. Run each and compare.
 ```bash
 python -c "import asyncio, src.server as s; print(len(asyncio.run(s.mcp.list_tools())), 'tools')"
 ```
-**Expected:** `99 tools`
+**Expected:** `101 tools`
 
 ### 6.2 Schema introspection (no LLM)
 
@@ -253,7 +254,33 @@ you > Investigate billing and usage issues for customer CUST000122
 **Expected:** a plain-English root-cause summary for CUST000122 with any billing
 issues and usage anomalies and recommended actions.
 
-### 6.7 Real seed identifiers (for your own tests)
+### 6.7 Ad-hoc data questions (universal SQL read agent)
+
+The assistant can answer arbitrary data questions — not just the curated ones —
+because `read_master_agent` falls back to `sql_read_agent`, which generates a
+safe, read-only `SELECT`. In `python chat.py`:
+```
+you > show account details for ACC000123
+you > show me all account numbers
+you > what currency does account ACC000123 use
+you > give me the top 5 customer ids
+```
+**Expected:** correct, data-backed answers for each (no "no records" for valid
+data). Use `/raw` to see the generated SQL. Only `SELECT` is ever run; any
+DML/DDL keyword or multi-statement input is rejected.
+
+### 6.8 Change an account's currency (write + no-op)
+
+In `python chat.py` (ACC000123 uses GBP in this example):
+```
+you > change account ACC000123 currency to GBP
+  Account ACC000123 currency is already 'GBP' - no change needed.
+
+you > change account ACC000123 currency to INR
+  ...This will change it from 'GBP' to 'INR'. Reply 'yes' ... or 'no' ...
+```
+
+### 6.9 Real seed identifiers (for your own tests)
 
 | Thing | Example value |
 |---|---|
@@ -299,7 +326,8 @@ pl-sql_MCP_SERVER/
 │   ├── tools/              # ~80 atomic tools, grouped by domain
 │   │   ├── schema.py  account.py  reference.py  customer.py
 │   │   ├── billing.py usage.py    power.py      approval.py  writes.py
-│   ├── agents/             # 15 agents (router, masters, sub-agents)
+│   ├── agents/             # 16 agents (router, masters, sub-agents,
+│   │                       #   incl. sql_read_agent = universal text-to-SQL)
 │   └── utils/
 │       ├── audit.py        # MCP_SECURITY_PKG.LOG_AUDIT wrapper
 │       └── errors.py       # ORA-xxxxx -> human-readable message mapper

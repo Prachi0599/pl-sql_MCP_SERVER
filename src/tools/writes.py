@@ -558,6 +558,54 @@ async def set_account_billable(
         await conn.close()
 
 
+async def update_account_currency(
+    account_number: str,
+    currency_code: str,
+    requested_by: str = "mcp_user",
+) -> dict:
+    """Change an account's billing currency (ACCOUNT.CURRENCY_ID) after approval."""
+    if not currency_code or not currency_code.strip():
+        return _validation_error("currency_code is required")
+
+    conn = await get_connection()
+    try:
+        account_id = await resolve_account_number(conn, account_number)
+        currency_id = await resolve_currency_code(conn, currency_code)
+        target = currency_code.upper()
+        current = await _current_value(conn, """
+            SELECT cur.CURRENCY_CODE
+            FROM   MCP_APP.ACCOUNT a
+            JOIN   MCP_APP.CURRENCY cur ON cur.CURRENCY_ID = a.CURRENCY_ID
+            WHERE  a.ACCOUNT_ID = :1
+        """, [account_id])
+        if current is not None and str(current).upper() == target:
+            return _no_change(f"Account {account_number} currency", current)
+
+        new_val = json.dumps({
+            "sql": "UPDATE MCP_APP.ACCOUNT SET CURRENCY_ID = :2 WHERE ACCOUNT_ID = :1",
+            "params": [account_id, currency_id],
+        })
+        req = await create_approval_request(
+            conn,
+            package_name="DIRECT_SQL",
+            procedure_name="UPDATE_ACCOUNT_CURRENCY",
+            action_type="UPDATE",
+            old_value=json.dumps({"account_number": account_number, "old_currency": current}),
+            new_value=new_val,
+            requested_by=requested_by,
+        )
+        await log_audit(_TOOL, "ACCOUNT", "update_account_currency", "UPDATE",
+                        {"account_number": account_number, "currency_code": target},
+                        "SUCCESS")
+        return _ok({**req, "current_value": current, "requested_value": target})
+    except ValueError as exc:
+        return _not_found(exc)
+    except Exception as exc:
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()
+
+
 # ── Group E: Products ─────────────────────────────────────────────────────────
 
 async def assign_product_to_account(

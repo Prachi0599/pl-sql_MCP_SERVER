@@ -216,6 +216,22 @@ _TOOL_DEFS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_account_currency",
+            "description": "Change an account's billing currency (e.g. set ACC000123 to INR).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_number": {"type": "string"},
+                    "currency_code":  {"type": "string", "description": "e.g. USD, INR, GBP"},
+                    "requested_by":   {"type": "string"},
+                },
+                "required": ["account_number", "currency_code"],
+            },
+        },
+    },
     # ── Group E: Products ──────────────────────────────────────────────────────
     {
         "type": "function",

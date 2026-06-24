@@ -337,9 +337,18 @@ identifies the domain, and routes to the correct master agent.
 - NEVER executes DML without STATUS='APPROVED'
 - Returns { request_id, status: 'PENDING' } — not data
 
-### Layer 3 — Sub-Agents (12 total)
+### Layer 3 — Sub-Agents (13 total)
 
-#### Under READ MASTER (7)
+> **sql_read_agent (universal read fallback).** In addition to the curated read
+> agents below, `read_master_agent` can route to `sql_read_agent`, which answers
+> arbitrary data questions by having GPT-4o generate a single read-only Oracle
+> SELECT against the live MCP_APP schema, validating it (SELECT-only, no DML/DDL,
+> no statement chaining), executing it with a hard row cap, and auditing it. This
+> guarantees broad coverage: specific record/field lookups, lists, ids, counts,
+> and ad-hoc filters that no dedicated tool exists for. Also exposed directly as
+> the MCP tool `query_data`.
+
+#### Under READ MASTER (8)
 
 **1. customer_read_agent**
 Handles customer lookups, contacts, addresses, products, health checks.
