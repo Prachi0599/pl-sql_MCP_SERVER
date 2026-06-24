@@ -1,0 +1,445 @@
+================================================================================
+ TCL FINANCE & BILLING MCP SERVER - TOOL VALIDATION QUESTION BANK
+================================================================================
+
+HOW TO USE
+  - Start the chat client from the project root:  python chat.py
+  - Type any question below. You get a plain-English answer.
+  - WRITE questions stage an approval and ask "yes/no" first - reply "no" to keep
+    the database unchanged, or "yes" to actually apply.
+  - "no change / already exists" replies are CORRECT behaviour (no-op detection).
+  - Type /raw to see the underlying JSON or generated SQL for any answer.
+  - Type /pending to see staged approval requests; /quit to exit.
+
+REAL SEED IDENTIFIERS (use these so questions return data)
+  customer number      : CUST000115 .. CUST010114   (e.g. CUST000122, CUST000200)
+  account number       : ACC000071 .. ACC010070     (e.g. ACC000123, ACC000071)
+  invoice number       : INV00000123 (and similar)
+  invoicing company    : INV0001, INV0002, INV0003 (countries: India, UK, USA, Germany)
+  customer types       : CORP, ENT, GOV, SMB, WHOLESALE
+  product code         : PROD0001 .. PROD0100        (e.g. PROD0048)
+  product types        : MPLS, INTERNET, IPVPN, SDWAN
+  currencies           : USD, GBP, INR, EUR
+  account statuses     : ACTIVE, INACTIVE, SUSPENDED
+  bill statuses        : GENERATED, PAID, PENDING, OVERDUE
+  source systems       : USAGE_COLLECTOR, NETWORK_GATEWAY, BILLING_ENGINE
+  packages (9)         : ACCOUNT_PKG, BILLING_PKG, BILLING_ADJUSTMENT_PKG,
+                         CUSTOMER_PKG, LOAD_MONITOR_PKG, MCP_SECURITY_PKG,
+                         METADATA_PKG, SERVICE_REQUEST_PKG, USAGE_ANALYTICS_PKG
+
+
+################################################################################
+# GROUP L - SCHEMA INTROSPECTION TOOLS
+################################################################################
+
+[list_tables]
+1.  What tables exist in the database?
+2.  How many tables are in the schema and what are their row counts?
+3.  List every table in MCP_APP.
+
+[describe_table]
+4.  Describe the CUSTOMER table.
+5.  What columns and constraints does the ACCOUNT table have?
+6.  Show me the structure of the BILL_SUMMARY table.
+7.  What are the columns of COSTED_EVENT?
+
+[list_packages]
+8.  List all PL/SQL packages in the schema.
+9.  Which packages are valid?
+
+[list_package_procedures]
+10. What procedures are in BILLING_PKG?
+11. List the procedures and functions inside ACCOUNT_PKG.
+12. What does USAGE_ANALYTICS_PKG contain?
+
+[get_procedure_signature]
+13. What parameters does BILLING_PKG.GENERATE_BILL take?
+14. Show the signature of CUSTOMER_PKG.CREATE_CUSTOMER.
+15. What arguments does ACCOUNT_PKG.UPDATE_ACCOUNT_STATUS expect?
+
+[list_sequences]
+16. List all sequences in the schema.
+17. How many sequences are there?
+
+[list_indexes]
+18. What indexes are on the ACCOUNT table?
+19. Show all indexes for BILL_SUMMARY.
+
+[find_procedure_for_table]
+20. Which procedures reference the BILL_SUMMARY table?
+21. What package code touches the COSTED_EVENT table?
+
+
+################################################################################
+# GROUP A & J - REFERENCE & LOOKUP TOOLS
+################################################################################
+
+[get_providers]
+22. List all active providers.
+23. Show me every provider including inactive ones.
+
+[get_provider_details]
+24. Show details for provider PRV001.
+
+[get_invoicing_companies]
+25. List invoicing companies in India.
+26. Show all invoicing companies.
+27. Which invoicing companies are in the USA?
+
+[get_currencies]
+28. What currencies are supported?
+29. List all currencies.
+
+[get_currency_by_code]
+30. Show details for currency USD.
+31. What is currency code GBP?
+
+[get_customer_types]
+32. List all customer types.
+33. What customer categories exist?
+
+
+################################################################################
+# GROUP B - CUSTOMER READ TOOLS
+################################################################################
+
+[search_customers]
+34. Search for customers with 'Enterprise' in the name.
+35. Show me 10 active customers.
+36. Find inactive customers.
+
+[get_customer_by_number]
+37. Show me customer CUST000122.
+38. Get details for customer CUST000200.
+
+[get_customer_360]
+39. Give me the full 360 profile for customer CUST000122.
+40. Show everything about customer CUST000150 - accounts, contacts, addresses, products.
+
+[get_customers_by_company]
+41. Which customers belong to invoicing company INV0001?
+42. List customers under company INV0002.
+
+[get_customer_summary_stats]
+43. How many active customers do we have?
+44. Give me customer counts broken down by type.
+45. How many customers are there in total?
+
+
+################################################################################
+# GROUP C & D - ADDRESS, CONTACT & ACCOUNT READ TOOLS
+################################################################################
+
+[get_customer_addresses]
+46. Show the addresses for customer CUST000122.
+
+[get_customer_contacts]
+47. List the contacts for customer CUST000200.
+48. Show contact email and phone for customer CUST000122.
+
+[search_contacts_by_email]
+49. Find contacts with email containing 'example.com'.
+
+[get_accounts_by_customer]
+50. What accounts does customer CUST000122 have?
+51. Show active accounts for customer CUST000150.
+
+[get_account_details]
+52. Show account details for ACC000123.
+53. Give me full details of account ACC000071.
+
+[get_accounts_by_currency]
+54. Which accounts use INR currency?
+55. List accounts billed in GBP.
+
+[get_account_commissioning_info]
+56. When was account ACC000123 commissioned?
+57. Show commissioning and termination info for ACC000071.
+
+[get_accounts_by_billing_cycle]
+58. Which accounts are on a MONTHLY billing cycle?
+
+[get_accounts_pending_termination]
+59. Which accounts are due to terminate in the next 30 days?
+
+
+################################################################################
+# GROUP E & F - PRODUCT & BILLING READ TOOLS
+################################################################################
+
+[get_products]
+60. List all active products.
+61. Show me products of type SDWAN.
+62. What MPLS products do we offer?
+
+[get_product_by_code]
+63. Show details for product PROD0048.
+
+[get_customer_products]
+64. What products does customer CUST000122 subscribe to?
+
+[get_bills_by_account]
+65. Show all bills for account ACC000123.
+66. List the invoices for account ACC000071.
+
+[get_bill_by_invoice_number]
+67. Show invoice INV00000123.
+
+[get_billing_summary_by_customer]
+68. What is the total billing for customer CUST000122?
+
+[get_unpaid_bills]
+69. Show me all unpaid bills.
+70. List overdue invoices in USD.
+
+[get_monthly_revenue]
+71. Show monthly revenue for the last 6 months.
+72. What was our revenue trend this year?
+
+[get_revenue_by_product_type]
+73. Break down revenue by product type.
+
+[get_pending_adjustments]
+74. Are there any pending billing adjustments?
+
+
+################################################################################
+# GROUP G, H, I - USAGE ANALYTICS & OPERATIONS READ TOOLS
+################################################################################
+
+[get_events_by_account]
+75. Show usage events for account ACC000071.
+76. List the costed events for account ACC000123.
+
+[get_event_summary]
+77. Summarize usage for account ACC000071.
+78. What is the total data usage for account ACC000123?
+
+[get_top_usage_accounts]
+79. What are the top 10 accounts by usage?
+80. Give me the top 5 accounts by bandwidth.
+
+[get_events_by_source_system]
+81. Show events from source system USAGE_COLLECTOR.
+82. List events from NETWORK_GATEWAY.
+
+[get_bandwidth_trend]
+83. Show the daily bandwidth trend for account ACC000071.
+84. What is the monthly bandwidth trend?
+
+[get_failed_events]
+85. Are there any failed costed events?
+
+[get_usage_anomalies]
+86. Show usage anomalies above 100 Mbps.
+87. Which accounts have unusually high speed?
+
+[get_load_status_today]
+88. What is today's data load status?
+
+[get_missing_loads]
+89. Which source systems have not loaded data in the last 7 days?
+
+[get_load_history]
+90. Show the load history for source system MEDIATION.
+
+[get_failed_load_summary]
+91. Summarize failed loads over the last week.
+
+[get_open_requests]
+92. Show all open service requests.
+
+[get_requests_by_customer]
+93. What service requests does customer CUST000122 have?
+
+
+################################################################################
+# GROUP M - CROSS-ENTITY POWER QUERIES
+################################################################################
+
+[search_globally]
+94. Search globally for 'CUST000122'.
+95. Find anything matching 'ACC000123'.
+
+[get_customer_health_check]
+96. Run a health check for customer CUST000122.
+97. Is customer CUST000200 healthy - any missing data or unpaid bills?
+
+[get_inactive_entities]
+98. Show me inactive customers and accounts.
+
+[get_expiring_products]
+99. Which products expire in the next 30 days?
+
+[get_full_hierarchy]
+100. Show the full hierarchy for customer CUST000122 (company, accounts, products).
+
+[get_accounts_no_events]
+101. Which active accounts have no usage events this month?
+
+
+################################################################################
+# GROUP K - APPROVAL & AUDIT MANAGEMENT
+################################################################################
+
+[get_pending_approvals]   (or type: /pending)
+102. Show me all pending approval requests.
+
+[get_my_pending_requests]
+103. What pending requests did user 'tester' raise?
+
+[get_audit_log]
+104. Show the recent audit log entries.
+105. Show audit log entries for the tool 'intent_router'.
+
+[get_audit_stats]
+106. Give me audit statistics per tool.
+
+[approve_request]            (use /approve <id> <user>, e.g. /approve 42 alice)
+107. Approve request 42 as alice.
+
+[reject_request]             (use /reject <id> <user>, e.g. /reject 42 alice)
+108. Reject request 42 as alice.
+
+
+################################################################################
+# WRITE TOOLS - DML (each asks for yes/no confirmation; reply "no" to stay clean)
+################################################################################
+
+[create_currency]            (duplicate -> "already exists")
+109. Create a new currency USD called US Dollar.            (expect: already exists)
+110. Create a new currency JPY called Japanese Yen.         (expect: confirm)
+
+[create_provider]
+111. Create a new provider PRV999 named Acme Telecom, service type Telecom, country India.
+
+[create_customer]
+112. Create a new customer named 'Test Corp' with company code INV0001 and type CORP.
+
+[update_customer_status]
+113. Set customer CUST000122 status to ACTIVE.             (expect: likely no-op)
+114. Set customer CUST000200 status to INACTIVE.           (expect: confirm)
+
+[add_customer_address]
+115. Add a billing address '1 Test Street, Mumbai, IN' for customer CUST000122.
+
+[add_customer_contact]
+116. Add a contact 'Jane Doe', Manager, jane@test.com for customer CUST000122.
+
+[update_contact_email]
+117. Update contact 1 email to newjane@test.com.
+
+[create_account]
+118. Create a new account 'Test Account' for customer CUST000122 in USD.
+
+[update_account_status]
+119. Set account ACC000123 status to ACTIVE.               (expect: no-op if active)
+120. Set account ACC000123 status to SUSPENDED.            (expect: from ACTIVE to SUSPENDED)
+
+[set_account_billable]
+121. Set account ACC000123 billable flag to Y.             (expect: no-op if already Y)
+122. Make account ACC000071 not billable.
+
+[update_account_currency]
+123. Change account ACC000123 currency to GBP.             (expect: no-op if already GBP)
+124. Change account ACC000123 currency to INR.             (expect: from GBP to INR)
+
+[assign_product_to_account]
+125. Assign product PROD0048 to account ACC000123 for customer CUST000123.  (no-op if already assigned)
+
+[terminate_customer_product]
+126. Terminate product PROD0048 for customer CUST000123.
+
+[create_bill]
+127. Generate a bill of 1000 plus 100 tax for account ACC000123 in USD.
+
+[update_bill_status]
+128. Mark invoice INV00000123 as PAID.
+
+[create_billing_adjustment]
+129. Apply a $250 CREDIT adjustment to invoice INV00000123 for account ACC000123 due to an outage.
+130. Open a $500 DISPUTE on invoice INV00000123 for account ACC000123.
+
+[ingest_costed_event]
+131. Ingest a costed event for account ACC000071: 1000000 in bits, 2000000 out bits, 500 Mbps, source USAGE_COLLECTOR.
+
+[create_service_request]
+132. Raise a HIGH priority billing service request for customer CUST000122: "invoice looks wrong", raised by alice.
+
+[assign_service_request]
+133. Assign service request 1 to bob.
+
+[resolve_service_request]
+134. Resolve service request 1 with note "fixed the rating error", resolved by bob.
+
+[add_customer_note]
+135. Add an RCA note to customer CUST000122: "called about billing discrepancy", created by alice.
+
+[update_provider_status]
+136. Set provider PRV001 status to ACTIVE.                 (expect: no-op if active)
+
+
+################################################################################
+# AGENTS - HIGHER-LEVEL (natural language; routed automatically by `ask`)
+################################################################################
+
+[schema_agent]
+137. What is the relationship between CUSTOMER and ACCOUNT?
+138. Which procedure should I use to create a new customer?
+
+[customer_read_agent]
+139. Tell me everything about customer CUST000122.
+140. How many customers do we have per type?
+
+[billing_read_agent]
+141. What is the outstanding balance for customer CUST000122?
+142. Show me this year's revenue.
+
+[usage_read_agent]
+143. Which accounts used the most bandwidth this month?
+144. Are there any usage anomalies?
+
+[operations_read_agent]
+145. What is the daily load status and any failed loads?
+146. Show open RCA tickets.
+
+[rca_agent]
+147. Investigate billing and usage issues for customer CUST000122.
+148. Diagnose why customer CUST000200 might have a wrong bill.
+
+[insight_agent]
+149. Give me an executive revenue summary.
+150. Which product type generates the most revenue?
+
+[sql_read_agent / query_data]   (universal fallback - arbitrary questions)
+151. How many accounts are SUSPENDED?
+152. List all account numbers.
+153. Give me the top 5 customer ids.
+154. What currency does account ACC000123 use?
+155. Count of bills by status.
+156. Average speed in Mbps across all costed events.
+157. How many customers does each invoicing company in India have?
+
+[onboarding_agent]
+158. Onboard a new customer 'Globex Ltd', company INV0001, type CORP, billing address
+     '5 Market St, Delhi, IN', contact 'Sam Lee' Director sam@globex.com, account
+     'Globex Main' in USD, product PROD0048.
+
+[billing_run_agent]
+159. Run the monthly billing for 2026-06.
+
+[adjustment_agent]
+160. Apply a $100 WAIVER to invoice INV00000123 for account ACC000123 as goodwill.
+
+[approval_agent]
+161. Show me all pending approvals.
+162. Approve request 42 (then: reject request 43 with reason 'duplicate').
+
+[intent_router / ask - the top-level entry]
+163. How many active customers do we have?            (-> READ)
+164. Create a new currency AUD called Australian Dollar.   (-> WRITE)
+165. Investigate customer CUST000122.                 (-> READ -> rca)
+
+================================================================================
+ END - 165 validation questions covering every tool and agent.
+================================================================================

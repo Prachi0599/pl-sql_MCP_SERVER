@@ -212,10 +212,12 @@ python -m pytest tests/ -m "not integration" -q
 Integration tests auto-skip if `DB_USER` / `DB_CONNECT_STRING` are not set, so the
 unit suite is safe to run anywhere.
 
-**Manual validation:** [`docs/VALIDATION_QUESTIONS.md`](docs/VALIDATION_QUESTIONS.md)
-is a 25-question script (reads, schema, RCA/insight, writes, no-op/duplicate,
-approvals) you can type into `python chat.py` to confirm the assistant answers
-every kind of question correctly.
+**Manual validation:**
+- [`docs/VALIDATION_QUESTIONS.md`](docs/VALIDATION_QUESTIONS.md) — a quick 25-question
+  smoke script (reads, schema, RCA/insight, writes, no-op, approvals).
+- [`docs/TEST_QUESTIONS.txt`](docs/TEST_QUESTIONS.txt) — the full bank: **165
+  questions organized per tool and agent** (every atomic tool + every agent),
+  with the real seed identifiers to use. Type them into `python chat.py`.
 
 ---
 
