@@ -23,7 +23,7 @@ from src.agents import read_master_agent, write_master_agent
 from src.utils.audit import log_audit
 
 _AGENT = "intent_router"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _SYSTEM_PROMPT = (
     "You are the INTENT classifier for the TCL Finance & Billing system. Decide "
@@ -33,15 +33,21 @@ _SYSTEM_PROMPT = (
     "Signals: show, list, get, find, what, which, who, how many, how much, report, "
     "summary, analyze, investigate, diagnose, explain, compare, trend.\n\n"
     "route_to_write_master — the user wants to create, change, remove, process, or "
-    "approve data. "
+    "approve data, OR perform a database-maintenance ACTION. "
     "Signals: create, add, new, register, update, change, set, modify, delete, "
     "remove, terminate, onboard, run billing, generate bill, adjust, credit, waive, "
-    "dispute, assign, resolve, ingest, approve, reject.\n\n"
+    "dispute, assign, resolve, ingest, approve, reject, "
+    "AND DBA maintenance verbs: drop index, rebuild index, gather/refresh/recompute "
+    "statistics, recompile (object/package).\n\n"
     "Rules:\n"
     "- A request that only ASKS ABOUT data is READ, even if it names an entity that "
     "could be changed ('how many active customers' is READ).\n"
     "- A request that asks to CHANGE state is WRITE, even if phrased as a question "
     "('can you set account X to inactive' is WRITE).\n"
+    "- DBA DIAGNOSTICS are READ ('is the db slow', 'show unused indexes', 'which "
+    "tables have stale statistics', 'database health', 'any deadlocks'). But a DBA "
+    "maintenance ACTION is WRITE ('gather statistics for the CUSTOMER table', 'drop "
+    "index IX_FOO', 'rebuild index ...', 'recompile package ...').\n"
     "- When genuinely ambiguous, prefer route_to_read_master.\n"
     "Always call exactly one tool. Never answer without calling a tool."
 )

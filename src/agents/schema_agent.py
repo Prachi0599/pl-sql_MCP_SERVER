@@ -21,7 +21,7 @@ from src.tools import schema as _schema
 from src.utils.audit import log_audit
 
 _AGENT = "schema_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _SYSTEM_PROMPT = (
     "You are a database schema assistant for the TCL Finance & Billing Oracle database "

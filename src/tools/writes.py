@@ -1225,3 +1225,169 @@ async def create_currency(
         return map_oracle_error(exc)
     finally:
         await conn.close()
+
+
+# ── Group L: Deletes (approval-gated DELETE DML) ──────────────────────────────
+# Deletes are staged as DIRECT_SQL with action_type='DELETE'. They run only
+# after approval, exactly like every other write. We pre-check that the target
+# row exists so a non-existent id is reported as a friendly no-op instead of a
+# 0-row delete. Only leaf rows safe to physically remove are exposed here; for
+# customers/accounts/products use status updates / terminate (soft delete).
+
+async def delete_customer_note(
+    note_id: int,
+    requested_by: str = "mcp_user",
+) -> dict:
+    """Delete a single CUSTOMER_NOTE row after approval."""
+    conn = await get_connection()
+    try:
+        nid = int(note_id)
+        existing = await _current_value(
+            conn, "SELECT NOTE_ID FROM MCP_APP.CUSTOMER_NOTE WHERE NOTE_ID = :1", [nid])
+        if existing is None:
+            return _no_change_msg(
+                f"Customer note {nid} does not exist - nothing to delete.")
+
+        new_val = json.dumps({
+            "sql": "DELETE FROM MCP_APP.CUSTOMER_NOTE WHERE NOTE_ID = :1",
+            "params": [nid],
+        })
+        req = await create_approval_request(
+            conn,
+            package_name="DIRECT_SQL",
+            procedure_name="DELETE_CUSTOMER_NOTE",
+            action_type="DELETE",
+            old_value=json.dumps({"note_id": nid}),
+            new_value=new_val,
+            requested_by=requested_by,
+        )
+        await log_audit(_TOOL, "CUSTOMER_NOTE", "delete_customer_note", "DELETE",
+                        {"note_id": nid}, "SUCCESS")
+        return _ok(req)
+    except (TypeError, ValueError):
+        return _validation_error("note_id must be a valid integer")
+    except Exception as exc:
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()
+
+
+async def delete_customer_address(
+    address_id: int,
+    requested_by: str = "mcp_user",
+) -> dict:
+    """Delete a single ADDRESS row after approval."""
+    conn = await get_connection()
+    try:
+        aid = int(address_id)
+        existing = await _current_value(
+            conn, "SELECT ADDRESS_ID FROM MCP_APP.ADDRESS WHERE ADDRESS_ID = :1", [aid])
+        if existing is None:
+            return _no_change_msg(
+                f"Address {aid} does not exist - nothing to delete.")
+
+        new_val = json.dumps({
+            "sql": "DELETE FROM MCP_APP.ADDRESS WHERE ADDRESS_ID = :1",
+            "params": [aid],
+        })
+        req = await create_approval_request(
+            conn,
+            package_name="DIRECT_SQL",
+            procedure_name="DELETE_ADDRESS",
+            action_type="DELETE",
+            old_value=json.dumps({"address_id": aid}),
+            new_value=new_val,
+            requested_by=requested_by,
+        )
+        await log_audit(_TOOL, "ADDRESS", "delete_customer_address", "DELETE",
+                        {"address_id": aid}, "SUCCESS")
+        return _ok(req)
+    except (TypeError, ValueError):
+        return _validation_error("address_id must be a valid integer")
+    except Exception as exc:
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()
+
+
+async def delete_customer_contact(
+    contact_id: int,
+    requested_by: str = "mcp_user",
+) -> dict:
+    """Delete a CONTACT (and its CONTACT_DETAILS child) after approval.
+
+    CONTACT_DETAILS has a FK to CONTACT, so it is removed first in the same
+    approved transaction via a multi-statement DIRECT_SQL payload."""
+    conn = await get_connection()
+    try:
+        cid = int(contact_id)
+        existing = await _current_value(
+            conn, "SELECT CONTACT_ID FROM MCP_APP.CONTACT WHERE CONTACT_ID = :1", [cid])
+        if existing is None:
+            return _no_change_msg(
+                f"Contact {cid} does not exist - nothing to delete.")
+
+        new_val = json.dumps({
+            "statements": [
+                {"sql": "DELETE FROM MCP_APP.CONTACT_DETAILS WHERE CONTACT_ID = :1",
+                 "params": [cid]},
+                {"sql": "DELETE FROM MCP_APP.CONTACT WHERE CONTACT_ID = :1",
+                 "params": [cid]},
+            ],
+        })
+        req = await create_approval_request(
+            conn,
+            package_name="DIRECT_SQL",
+            procedure_name="DELETE_CONTACT",
+            action_type="DELETE",
+            old_value=json.dumps({"contact_id": cid}),
+            new_value=new_val,
+            requested_by=requested_by,
+        )
+        await log_audit(_TOOL, "CONTACT", "delete_customer_contact", "DELETE",
+                        {"contact_id": cid}, "SUCCESS")
+        return _ok(req)
+    except (TypeError, ValueError):
+        return _validation_error("contact_id must be a valid integer")
+    except Exception as exc:
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()
+
+
+async def delete_costed_event(
+    event_id: int,
+    requested_by: str = "mcp_user",
+) -> dict:
+    """Delete a single COSTED_EVENT row after approval."""
+    conn = await get_connection()
+    try:
+        eid = int(event_id)
+        existing = await _current_value(
+            conn, "SELECT EVENT_ID FROM MCP_APP.COSTED_EVENT WHERE EVENT_ID = :1", [eid])
+        if existing is None:
+            return _no_change_msg(
+                f"Costed event {eid} does not exist - nothing to delete.")
+
+        new_val = json.dumps({
+            "sql": "DELETE FROM MCP_APP.COSTED_EVENT WHERE EVENT_ID = :1",
+            "params": [eid],
+        })
+        req = await create_approval_request(
+            conn,
+            package_name="DIRECT_SQL",
+            procedure_name="DELETE_COSTED_EVENT",
+            action_type="DELETE",
+            old_value=json.dumps({"event_id": eid}),
+            new_value=new_val,
+            requested_by=requested_by,
+        )
+        await log_audit(_TOOL, "COSTED_EVENT", "delete_costed_event", "DELETE",
+                        {"event_id": eid}, "SUCCESS")
+        return _ok(req)
+    except (TypeError, ValueError):
+        return _validation_error("event_id must be a valid integer")
+    except Exception as exc:
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()

@@ -19,7 +19,7 @@ from src.tools import writes as _writes
 from src.utils.audit import log_audit
 
 _AGENT = "adjustment_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _SYSTEM_PROMPT = (
     "You are a billing adjustment agent for the TCL Finance & Billing system. "

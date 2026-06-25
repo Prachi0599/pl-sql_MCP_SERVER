@@ -23,7 +23,7 @@ from src.tools import writes as _writes
 from src.utils.audit import log_audit
 
 _AGENT = "dml_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _MASS_DML = re.compile(r"\b(delete|update|remove)\s+all\b", re.IGNORECASE)
 
@@ -443,6 +443,67 @@ _TOOL_DEFS: list[dict] = [
                     "requested_by":  {"type": "string"},
                 },
                 "required": ["currency_code", "currency_name"],
+            },
+        },
+    },
+    # ── Group L: Deletes ───────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_customer_note",
+            "description": "Delete a single customer note by its note id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "note_id":      {"type": "integer"},
+                    "requested_by": {"type": "string"},
+                },
+                "required": ["note_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_customer_address",
+            "description": "Delete a customer address by its address id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "address_id":   {"type": "integer"},
+                    "requested_by": {"type": "string"},
+                },
+                "required": ["address_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_customer_contact",
+            "description": "Delete a customer contact (and its phone/contact details) by contact id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "contact_id":   {"type": "integer"},
+                    "requested_by": {"type": "string"},
+                },
+                "required": ["contact_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_costed_event",
+            "description": "Delete a single costed usage event by its event id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id":     {"type": "integer"},
+                    "requested_by": {"type": "string"},
+                },
+                "required": ["event_id"],
             },
         },
     },

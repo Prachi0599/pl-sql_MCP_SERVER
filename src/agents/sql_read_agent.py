@@ -28,7 +28,7 @@ from src.utils.audit import log_audit
 from src.utils.errors import map_oracle_error
 
 _AGENT = "sql_read_agent"
-_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 _MAX_ROWS = 200
 
 _FORBIDDEN = re.compile(

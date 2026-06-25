@@ -23,7 +23,7 @@ from src.tools import power as _power
 from src.utils.audit import log_audit
 
 _AGENT = "customer_read_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _SYSTEM_PROMPT = (
     "You are a customer data assistant for the TCL Finance & Billing Oracle database "

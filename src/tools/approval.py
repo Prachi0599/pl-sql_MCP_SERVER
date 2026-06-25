@@ -47,10 +47,14 @@ async def _callproc(conn: oracledb.AsyncConnection,
 
 
 async def _exec_dml(conn: oracledb.AsyncConnection,
-                    sql: str, params: list | None = None) -> None:
-    """Execute INSERT/UPDATE/DELETE or PL/SQL block — no result set."""
+                    sql: str, params: list | None = None) -> int:
+    """Execute INSERT/UPDATE/DELETE or PL/SQL block — no result set.
+
+    Returns the number of rows affected (cur.rowcount). For anonymous PL/SQL
+    blocks Oracle reports the rowcount of the last DML run inside the block."""
     with conn.cursor() as cur:
         await cur.execute(sql, params or [])
+        return cur.rowcount or 0
 
 
 def _clamp(n: int) -> int:
@@ -85,18 +89,20 @@ async def _dispatch_dml(conn: oracledb.AsyncConnection,
         payload = {}
 
     params = payload.get("params", [])
+    rows_affected = 0
 
     if package_name == "DIRECT_SQL":
         statements = payload.get("statements")
         if statements:
             for stmt in statements:
-                await _exec_dml(conn, stmt["sql"], stmt.get("params", []))
+                rows_affected += await _exec_dml(conn, stmt["sql"], stmt.get("params", []))
         elif "sql" in payload:
-            await _exec_dml(conn, payload["sql"], params)
+            rows_affected += await _exec_dml(conn, payload["sql"], params)
         else:
             return {"dispatched": False, "reason": "No SQL in DIRECT_SQL payload"}
         await conn.commit()
-        result: dict = {"dispatched": True, "method": "direct_sql"}
+        result: dict = {"dispatched": True, "method": "direct_sql",
+                        "rows_affected": rows_affected}
     else:
         if not procedure_name:
             return {"dispatched": False, "reason": "No procedure in approval request"}
@@ -105,7 +111,11 @@ async def _dispatch_dml(conn: oracledb.AsyncConnection,
         )
         await _callproc(conn, full_proc, params)
         await conn.commit()
-        result = {"dispatched": True, "procedure": full_proc}
+        # A package procedure performs its own DML internally; oracledb cannot
+        # report its rowcount, so we report 1 (the single entity it acts on).
+        rows_affected = 1
+        result = {"dispatched": True, "procedure": full_proc,
+                  "rows_affected": rows_affected}
 
     post_query = payload.get("post_query")
     if post_query:
@@ -113,6 +123,58 @@ async def _dispatch_dml(conn: oracledb.AsyncConnection,
         result["post_query_result"] = rows[0] if rows else {}
 
     return result
+
+
+def _describe_change(action_type: str | None,
+                     old_value_json: str | None,
+                     new_value_json: str | None,
+                     procedure_name: str | None,
+                     rows_affected: int) -> str:
+    """Build a short human-readable description of what an approved DML did.
+
+    Uses the OLD_VALUE / NEW_VALUE JSON captured when the request was staged.
+    Examples:
+      "UPDATE on account status: 'ACTIVE' -> 'INACTIVE' (1 row changed)"
+      "INSERT_CURRENCY: created 1 record"
+    """
+    act = (action_type or "CHANGE").upper()
+    noun = "row" if rows_affected == 1 else "rows"
+
+    old: dict = {}
+    try:
+        old = json.loads(old_value_json) if old_value_json else {}
+    except (json.JSONDecodeError, TypeError):
+        old = {}
+
+    # Find a before/after pair in OLD_VALUE (tools store e.g. {"old_status": X}).
+    before = None
+    for k, v in (old.items() if isinstance(old, dict) else []):
+        if k.startswith("old_"):
+            before = v
+            break
+    new_params = {}
+    try:
+        nv = json.loads(new_value_json) if new_value_json else {}
+        new_params = nv if isinstance(nv, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        new_params = {}
+
+    label = (procedure_name or act).replace("_", " ").lower()
+
+    if act == "UPDATE":
+        if before is not None:
+            after = None
+            plist = new_params.get("params")
+            if isinstance(plist, list) and plist:
+                after = plist[-1]
+            arrow = f"'{before}' -> '{after}'" if after is not None else f"was '{before}'"
+            return f"{label}: {arrow} ({rows_affected} {noun} changed)"
+        return f"{label}: {rows_affected} {noun} updated"
+    if act == "INSERT":
+        return f"{label}: created {rows_affected} {noun}"
+    if act == "DELETE":
+        return f"{label}: deleted {rows_affected} {noun}"
+    return f"{label}: {rows_affected} {noun} affected"
 
 
 # ── Internal helper used by all write tools ───────────────────────────────────
@@ -302,7 +364,7 @@ async def approve_request(request_id: int, approved_by: str) -> dict:
         # Read request row to get DML details
         rows = await _exec(conn, """
             SELECT REQUEST_ID, PACKAGE_NAME, PROCEDURE_NAME,
-                   ACTION_TYPE, NEW_VALUE, STATUS
+                   ACTION_TYPE, OLD_VALUE, NEW_VALUE, STATUS
             FROM   MCP_APP.MCP_APPROVAL_REQUEST
             WHERE  REQUEST_ID = :1
         """, [request_id])
@@ -329,15 +391,24 @@ async def approve_request(request_id: int, approved_by: str) -> dict:
             req.get("new_value"),
         )
 
+        rows_affected = dml.get("rows_affected", 0) if isinstance(dml, dict) else 0
+        change_summary = _describe_change(
+            req.get("action_type"), req.get("old_value"), req.get("new_value"),
+            req.get("procedure_name"), rows_affected)
+
         await log_audit(_TOOL, "MCP_SECURITY_PKG", "APPROVE_REQUEST",
                         "UPDATE",
-                        {"request_id": request_id, "approved_by": approved_by},
+                        {"request_id": request_id, "approved_by": approved_by,
+                         "rows_affected": rows_affected},
                         "SUCCESS")
         return {
             "success": True,
             "request_id": request_id,
             "approved_by": approved_by,
             "status": "APPROVED",
+            "action_type": req.get("action_type"),
+            "rows_affected": rows_affected,
+            "change_summary": change_summary,
             "dml_result": dml,
         }
     except oracledb.DatabaseError as exc:

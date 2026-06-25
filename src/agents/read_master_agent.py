@@ -19,6 +19,7 @@ from openai import AsyncOpenAI
 from src.agents import (
     billing_read_agent,
     customer_read_agent,
+    dba_agent,
     insight_agent,
     operations_read_agent,
     rca_agent,
@@ -29,7 +30,7 @@ from src.agents import (
 from src.utils.audit import log_audit
 
 _AGENT = "read_master_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _SYSTEM_PROMPT = (
     "You are the READ router for the TCL Finance & Billing system. Choose EXACTLY "
@@ -52,6 +53,11 @@ _SYSTEM_PROMPT = (
     "indexes — 'what tables/packages exist', 'describe table', 'parameters of procedure X'.\n"
     "- insight_agent: EXECUTIVE financial narratives across the whole business — total "
     "revenue trends, revenue by product type, period/quarterly summaries, top-line KPIs.\n"
+    "- dba_agent: DATABASE ADMINISTRATION / performance & health — 'is the database slow', "
+    "database health, deadlocks / blocking / lock contention, slow queries / query "
+    "optimization, wait events, tablespace / space usage, INVALID objects, unused or "
+    "redundant indexes ('remove unwanted indexing'), stale optimizer statistics, "
+    "long-running operations.\n"
     "- sql_read_agent: GENERAL-PURPOSE data lookups — any specific record, field, list, "
     "id, count, or ad-hoc filter that the agents above don't squarely cover. Examples: "
     "'show account details for ACC000123', 'list all account numbers', 'top 5 customer "
@@ -74,6 +80,7 @@ _AGENT_MAP = {
     "usage_read_agent":       usage_read_agent,
     "operations_read_agent":  operations_read_agent,
     "insight_agent":          insight_agent,
+    "dba_agent":              dba_agent,
     "sql_read_agent":         sql_read_agent,
 }
 
@@ -190,6 +197,25 @@ _TOOL_DEFS: list[dict] = [
             "description": (
                 "Route to the insight agent for executive-level financial reports: "
                 "revenue trends, product performance, outstanding payments, period summaries."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The user's question"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dba_agent",
+            "description": (
+                "Database-administration & performance agent. Use for database "
+                "health, slow queries / query optimization, deadlocks / blocking, "
+                "wait events, tablespace & space usage, invalid objects, unused or "
+                "redundant indexes, stale statistics, and long-running operations."
             ),
             "parameters": {
                 "type": "object",

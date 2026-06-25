@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -48,14 +49,39 @@ except Exception:
     pass
 
 RAW_MODE = False
-# When a write is staged, holds (request_id, approver, human_description) until
-# the user confirms or cancels it.
+# When a write is staged, holds (request_id, approver, human_description, leaf)
+# until the user confirms or cancels it.
 PENDING_APPROVAL: tuple | None = None
 _APPROVER = "chat_user"
+
+# ── Conversation memory ───────────────────────────────────────────────────────
+# Rolling chat history (so natural follow-ups read in context) plus the last
+# "rich" result (e.g. an RCA) so the user can say "apply the recommended action"
+# or "what about his accounts?" and we keep the thread instead of starting cold.
+CHAT_HISTORY: list[dict] = []
+_HISTORY_MAX = 12            # keep the last N turns for the presenter
+LAST_CONTEXT: dict | None = None   # {"customer_number","recommended_actions","rca_summary"}
 
 _AFFIRMATIVE = {"yes", "y", "approve", "approved", "confirm", "ok", "okay",
                 "go ahead", "proceed", "do it", "sure"}
 _NEGATIVE = {"no", "n", "cancel", "reject", "stop", "abort", "nevermind"}
+
+# Ordinal words only (bare cardinals like "one" are excluded — "the second one"
+# must resolve to 2, not 1).
+_ORDINALS = {
+    "first": 1, "1st": 1,
+    "second": 2, "2nd": 2,
+    "third": 3, "3rd": 3,
+    "fourth": 4, "4th": 4,
+    "fifth": 5, "5th": 5,
+}
+# Phrases that mean "act on the recommendation you just gave me".
+_RECO_REF = (
+    "recommend", "recommendation", "suggested", "suggestion",
+    "that fix", "those fixes", "the fix", "remediation",
+    "apply it", "apply that", "apply them", "do that", "do it",
+    "go ahead with", "implement", "take that action", "action it",
+)
 
 EXAMPLES = """
 Just ask in plain English - examples:
@@ -95,19 +121,23 @@ _PRESENTER_SYSTEM = (
 
 
 async def _say(question: str, data: dict) -> str:
-    """Turn a structured result into a natural-language answer via GPT-4o."""
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o")
+    """Turn a structured result into a natural-language answer.
+
+    Recent conversation history is included so the model can resolve follow-ups
+    ("what about his accounts?", "and the second one?") in context."""
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     blob = json.dumps(data, default=str)
     if len(blob) > 6000:
         blob = blob[:6000] + " ...(truncated)"
+    messages = [{"role": "system", "content": _PRESENTER_SYSTEM}]
+    # Replay a trimmed history so the reply stays on-thread.
+    messages.extend(CHAT_HISTORY[-_HISTORY_MAX:])
+    messages.append({"role": "user",
+                     "content": f"Question: {question}\n\nData returned:\n{blob}"})
     try:
         resp = await _client().chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": _PRESENTER_SYSTEM},
-                {"role": "user",
-                 "content": f"Question: {question}\n\nData returned:\n{blob}"},
-            ],
+            messages=messages,
         )
         return (resp.choices[0].message.content or "").strip()
     except Exception as exc:  # fall back to a compact dump
@@ -157,23 +187,124 @@ def _confirmation_text(leaf: dict) -> str:
             f"  Reply 'yes' to approve and apply it, or 'no' to cancel.")
 
 
+# ── conversation context (RCA recommendations + follow-ups) ───────────────────
+
+def _remember(user_text: str, assistant_text: str) -> None:
+    """Append a turn to the rolling chat history (trimmed to the last N turns)."""
+    CHAT_HISTORY.append({"role": "user", "content": user_text})
+    CHAT_HISTORY.append({"role": "assistant", "content": assistant_text})
+    if len(CHAT_HISTORY) > _HISTORY_MAX * 2:
+        del CHAT_HISTORY[: len(CHAT_HISTORY) - _HISTORY_MAX * 2]
+
+
+def _capture_rca_context(leaf: dict) -> None:
+    """If this read result is an RCA (has recommended_actions), remember it so a
+    later 'apply the recommended action' keeps the customer + actions in scope."""
+    global LAST_CONTEXT
+    if not isinstance(leaf, dict):
+        return
+    actions = leaf.get("recommended_actions")
+    if isinstance(actions, list) and actions:
+        LAST_CONTEXT = {
+            "customer_number": leaf.get("customer_number"),
+            "recommended_actions": [str(a) for a in actions],
+            "rca_summary": leaf.get("rca_summary", ""),
+        }
+
+
+def _looks_like_reco_followup(low: str) -> bool:
+    return any(kw in low for kw in _RECO_REF)
+
+
+def _pick_action_index(low: str, n: int) -> int | None:
+    """Resolve which recommended action the user means. Returns a 1-based index,
+    0 for 'all', or None if unspecified (caller defaults to the first)."""
+    if "all" in low or "every" in low or "them all" in low:
+        return 0
+    m = re.search(r"(?:action|recommendation|option|step|#)\s*(\d+)", low)
+    if m:
+        idx = int(m.group(1))
+        return idx if 1 <= idx <= n else None
+    for word, idx in _ORDINALS.items():
+        if re.search(rf"\b{word}\b", low) and idx <= n:
+            return idx
+    return None
+
+
+def _reco_followup_request(low: str) -> str | None:
+    """Build an enriched WRITE request from a 'apply the recommendation' follow-up,
+    using the remembered RCA context. Returns None if there is nothing to act on."""
+    if not LAST_CONTEXT or not _looks_like_reco_followup(low):
+        return None
+    actions = LAST_CONTEXT.get("recommended_actions") or []
+    if not actions:
+        return None
+    cust = LAST_CONTEXT.get("customer_number") or "the customer"
+    summary = (LAST_CONTEXT.get("rca_summary") or "")[:400]
+
+    pick = _pick_action_index(low, len(actions))
+    if pick == 0:
+        chosen = "; ".join(actions)
+    elif pick is None:
+        chosen = actions[0]
+    else:
+        chosen = actions[pick - 1]
+
+    return (
+        f"For customer {cust}, carry out this recommended remediation action "
+        f"from the earlier root-cause analysis: \"{chosen}\". "
+        f"Context for the analysis: {summary}"
+    )
+
+
+def _maybe_followup(stripped: str) -> str | None:
+    """Rewrite a context-dependent follow-up into a self-contained request.
+
+    1. 'apply the recommended action' → enriched WRITE request (RCA context).
+    2. A pronoun-only follow-up ('what about his bills?') → same question with
+       the remembered customer number appended so routing still has a subject."""
+    low = stripped.lower()
+    reco = _reco_followup_request(low)
+    if reco:
+        return reco
+    if LAST_CONTEXT and LAST_CONTEXT.get("customer_number"):
+        if re.search(r"\b(he|him|his|she|her|they|them|their|that customer|this customer)\b", low):
+            return f"{stripped} (regarding customer {LAST_CONTEXT['customer_number']})"
+    return None
+
+
 # ── command + message handling ────────────────────────────────────────────────
 
 async def _resolve_pending(affirm: bool) -> None:
     """Approve or reject the change currently awaiting confirmation."""
     global PENDING_APPROVAL
     from src.tools.approval import approve_request, reject_request
-    request_id, approver, desc = PENDING_APPROVAL
+    request_id, approver, desc = PENDING_APPROVAL[0], PENDING_APPROVAL[1], PENDING_APPROVAL[2]
+    leaf = PENDING_APPROVAL[3] if len(PENDING_APPROVAL) > 3 else {}
     PENDING_APPROVAL = None
     if affirm:
         res = await approve_request(request_id, approver)
         if res.get("success"):
-            extra = ""
+            rows = res.get("rows_affected")
+            # Prefer the backend's change summary; otherwise reconstruct from the
+            # staged leaf's before/after values.
+            change = res.get("change_summary")
+            if not change:
+                cur = leaf.get("current_value")
+                req = leaf.get("requested_value")
+                if cur is not None and req is not None:
+                    change = f"changed from '{cur}' to '{req}'"
             dml = res.get("dml_result") or {}
             pq = dml.get("post_query_result") or {}
+            details = []
+            if rows is not None:
+                details.append(f"{rows} row{'s' if rows != 1 else ''} changed")
+            if change:
+                details.append(change)
             if pq:
-                extra = f" ({', '.join(f'{k}={v}' for k, v in pq.items())})"
-            print(f"  Done - approved and applied (request #{request_id}).{extra}")
+                details.append(", ".join(f"{k}={v}" for k, v in pq.items()))
+            tail = (" — " + "; ".join(details)) if details else ""
+            print(f"  Done - approved and applied (request #{request_id}).{tail}")
         else:
             print(f"  Could not apply it: {res.get('message', res.get('error_code'))}")
     else:
@@ -244,8 +375,12 @@ async def _handle(line: str) -> None:
               f"{res.get('message', res.get('status', ''))}")
         return
 
-    # 3) Natural-language request -> intent router
-    payload = await router_run(stripped)
+    # 3) Natural-language request -> intent router.
+    #    First, rewrite context-dependent follow-ups ("apply the recommended
+    #    action", "what about his bills?") into a self-contained request so the
+    #    thread of conversation is preserved across turns.
+    routed_text = _maybe_followup(stripped) or stripped
+    payload = await router_run(routed_text)
 
     if RAW_MODE:
         print(json.dumps(payload, indent=2, default=str))
@@ -258,17 +393,32 @@ async def _handle(line: str) -> None:
     kind, leaf = _find_write(payload)
 
     if kind == "no_change":
-        print(f"  {leaf.get('message', 'No change needed.')}")
+        msg = leaf.get('message', 'No change needed.')
+        print(f"  {msg}")
+        _remember(stripped, msg)
         return
 
     if kind == "pending":
         print("  " + _confirmation_text(leaf))
         desc = leaf.get("summary") or leaf.get("action") or "change"
-        PENDING_APPROVAL = (leaf["request_id"], _APPROVER, desc)
+        PENDING_APPROVAL = (leaf["request_id"], _APPROVER, desc, leaf)
+        _remember(stripped, _confirmation_text(leaf))
         return
 
-    # Read / everything else -> natural-language answer
-    print(await _say(stripped, leaf))
+    # Read / everything else -> natural-language answer.
+    # Capture RCA context first so a later "apply the recommendation" works.
+    _capture_rca_context(leaf)
+    answer = await _say(routed_text, leaf)
+    print(answer)
+    # If this was an RCA, list the recommended actions with numbers so the user
+    # can pick one ("apply recommendation 2") and we keep the customer in scope.
+    actions = leaf.get("recommended_actions") if isinstance(leaf, dict) else None
+    if isinstance(actions, list) and actions:
+        print("\n  Recommended actions (reply e.g. 'apply recommendation 1' or "
+              "'apply all'):")
+        for i, act in enumerate(actions, 1):
+            print(f"    {i}. {act}")
+    _remember(stripped, answer)
 
 
 async def main() -> None:

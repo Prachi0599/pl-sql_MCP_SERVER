@@ -543,6 +543,114 @@ async def create_currency(currency_code: str, currency_name: str,
     Dispatching a duplicate code returns ORA-00001."""
     return await _writes.create_currency(currency_code, currency_name, requested_by)
 
+@mcp.tool()
+async def delete_customer_note(note_id: int,
+                               requested_by: str = "mcp_user") -> dict:
+    """Delete a customer note — returns PENDING approval request."""
+    return await _writes.delete_customer_note(note_id, requested_by)
+
+@mcp.tool()
+async def delete_customer_address(address_id: int,
+                                  requested_by: str = "mcp_user") -> dict:
+    """Delete a customer address — returns PENDING approval request."""
+    return await _writes.delete_customer_address(address_id, requested_by)
+
+@mcp.tool()
+async def delete_customer_contact(contact_id: int,
+                                  requested_by: str = "mcp_user") -> dict:
+    """Delete a customer contact and its contact details — returns PENDING approval request."""
+    return await _writes.delete_customer_contact(contact_id, requested_by)
+
+@mcp.tool()
+async def delete_costed_event(event_id: int,
+                              requested_by: str = "mcp_user") -> dict:
+    """Delete a costed usage event — returns PENDING approval request."""
+    return await _writes.delete_costed_event(event_id, requested_by)
+
+
+# ── Group N — DBA / Database-Administration Tools ─────────────────────────────
+from src.tools import dba as _dba  # noqa: E402
+
+@mcp.tool()
+async def get_database_health() -> dict:
+    """One-shot DB health snapshot: version, invalid objects, size, stale stats."""
+    return await _dba.get_database_health()
+
+@mcp.tool()
+async def get_active_sessions(limit: int = 20) -> dict:
+    """List current user sessions (needs V$ access; degrades with a clear message)."""
+    return await _dba.get_active_sessions(limit)
+
+@mcp.tool()
+async def get_blocking_sessions() -> dict:
+    """Find blocking locks / lock contention / deadlock risk (needs V$ access)."""
+    return await _dba.get_blocking_sessions()
+
+@mcp.tool()
+async def get_slow_queries(limit: int = 10) -> dict:
+    """Top SQL by average elapsed time — query-optimization candidates (needs V$)."""
+    return await _dba.get_slow_queries(limit)
+
+@mcp.tool()
+async def get_wait_events(limit: int = 15) -> dict:
+    """Top database wait events by time waited (needs V$ access)."""
+    return await _dba.get_wait_events(limit)
+
+@mcp.tool()
+async def get_tablespace_usage() -> dict:
+    """Space usage per tablespace (falls back to schema segment roll-up)."""
+    return await _dba.get_tablespace_usage()
+
+@mcp.tool()
+async def get_segment_sizes(limit: int = 20) -> dict:
+    """Largest segments (tables/indexes) in the schema."""
+    return await _dba.get_segment_sizes(limit)
+
+@mcp.tool()
+async def get_invalid_objects() -> dict:
+    """List INVALID schema objects that need recompilation."""
+    return await _dba.get_invalid_objects()
+
+@mcp.tool()
+async def get_unused_indexes() -> dict:
+    """Secondary (non-constraint) indexes to review for removal."""
+    return await _dba.get_unused_indexes()
+
+@mcp.tool()
+async def get_redundant_indexes() -> dict:
+    """Indexes whose columns prefix another index on the same table (redundant)."""
+    return await _dba.get_redundant_indexes()
+
+@mcp.tool()
+async def get_table_stats_status() -> dict:
+    """Tables with missing or stale optimizer statistics (gather-stats candidates)."""
+    return await _dba.get_table_stats_status()
+
+@mcp.tool()
+async def get_long_operations() -> dict:
+    """Long-running operations currently in progress (perceived slowdown)."""
+    return await _dba.get_long_operations()
+
+@mcp.tool()
+async def drop_index(index_name: str, requested_by: str = "mcp_user") -> dict:
+    """Drop a non-constraint index — returns PENDING approval request."""
+    return await _dba.drop_index(index_name, requested_by)
+
+@mcp.tool()
+async def rebuild_index(index_name: str, requested_by: str = "mcp_user") -> dict:
+    """Rebuild/defragment an index — returns PENDING approval request."""
+    return await _dba.rebuild_index(index_name, requested_by)
+
+@mcp.tool()
+async def gather_table_stats(table_name: str, requested_by: str = "mcp_user") -> dict:
+    """Gather/refresh optimizer statistics for a table — returns PENDING approval request."""
+    return await _dba.gather_table_stats(table_name, requested_by)
+
+@mcp.tool()
+async def recompile_object(object_name: str, requested_by: str = "mcp_user") -> dict:
+    """Recompile an INVALID object — returns PENDING approval request."""
+    return await _dba.recompile_object(object_name, requested_by)
+
 
 # ── Task 14: schema_agent ─────────────────────────────────────────────────────
 from src.agents import schema_agent as _schema_agent_mod  # noqa: E402
@@ -635,6 +743,7 @@ from src.agents import (  # noqa: E402
     onboarding_agent as _onboarding_agent,
     billing_run_agent as _billing_run_agent,
     adjustment_agent as _adjustment_agent,
+    dba_agent as _dba_agent,
 )
 
 @mcp.tool()
@@ -732,6 +841,14 @@ async def billing_run_agent(billing_month: str, requested_by: str = "mcp_user") 
 async def adjustment_agent(question: str) -> dict:
     """Create a billing adjustment (CREDIT / DISPUTE / WAIVER) via the approval workflow."""
     return await _adjustment_agent.run(question)
+
+@mcp.tool()
+async def dba_agent(question: str) -> dict:
+    """Database-administration agent in plain English: DB health, slow queries,
+    deadlocks/blocking, wait events, space usage, invalid objects, unused/redundant
+    indexes, stale stats, long operations (reads), and index/stats/recompile
+    maintenance (approval-gated writes)."""
+    return await _dba_agent.run(question)
 
 
 if __name__ == "__main__":

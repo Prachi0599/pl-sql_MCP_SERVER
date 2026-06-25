@@ -32,7 +32,7 @@ from src.tools import usage as _usage
 from src.utils.audit import log_audit
 
 _AGENT = "rca_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _TOOLS_USED = [
     "get_customer_360",

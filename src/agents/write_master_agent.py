@@ -25,13 +25,14 @@ from src.agents import (
     adjustment_agent,
     approval_agent,
     billing_run_agent,
+    dba_agent,
     dml_agent,
     onboarding_agent,
 )
 from src.utils.audit import log_audit
 
 _AGENT = "write_master_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _SYSTEM_PROMPT = (
     "You are the WRITE router for the TCL Finance & Billing system. Choose EXACTLY "
@@ -46,14 +47,19 @@ _SYSTEM_PROMPT = (
     "DISPUTE, or WAIVER.\n"
     "- approval_agent: manage the APPROVAL QUEUE — list pending approvals, or approve/"
     "reject a request by id.\n"
-    "- dml_agent: ANY OTHER single write — create or update one customer, account, "
-    "contact, address, bill, currency, provider, product assignment, costed event, "
-    "service request, note, or a single status/flag change.\n\n"
+    "- dml_agent: ANY OTHER single write — create, update, or DELETE one customer, "
+    "account, contact, address, bill, currency, provider, product assignment, costed "
+    "event, service request, note, or a single status/flag change.\n"
+    "- dba_agent: DATABASE-ADMINISTRATION maintenance — drop or rebuild an index "
+    "('remove unwanted indexing'), gather/refresh table statistics, or recompile an "
+    "invalid object.\n\n"
     "Disambiguation:\n"
-    "- One field/status change, or one new single record -> dml_agent.\n"
+    "- One field/status change, one new single record, or deleting one note/address/"
+    "contact/event -> dml_agent.\n"
     "- Full new-customer setup with multiple linked records -> onboarding_agent.\n"
     "- Credit / refund / waiver / dispute on an invoice -> adjustment_agent.\n"
     "- Approve, reject, or list pending requests -> approval_agent.\n"
+    "- Index/statistics/recompile maintenance -> dba_agent.\n"
     "Always call exactly one tool. Never answer without calling a tool."
 )
 
@@ -164,6 +170,23 @@ _TOOL_DEFS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "dba_agent",
+            "description": (
+                "Database-administration maintenance: drop or rebuild an index, "
+                "gather/refresh table statistics, or recompile an invalid object."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The user's DBA maintenance request"},
+                },
+                "required": ["question"],
+            },
+        },
+    },
 ]
 
 
@@ -181,6 +204,8 @@ async def _dispatch(name: str, args: dict) -> dict:
         return await approval_agent.run(args.get("question", ""))
     if name == "adjustment_agent":
         return await adjustment_agent.run(args.get("question", ""))
+    if name == "dba_agent":
+        return await dba_agent.run(args.get("question", ""))
     return {"success": False, "error_code": "UNKNOWN_AGENT",
             "message": f"Unknown write agent: {name}"}
 

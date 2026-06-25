@@ -9,9 +9,28 @@ agent stack, calls the right Oracle packages/SQL, and returns structured JSON.
 
 - **Language:** Python 3.11+ (async)
 - **Database:** Oracle (`localhost:1521/FREEPDB1`, schema `MCP_APP`) via `oracledb`
-- **LLM:** OpenAI GPT-4o (agent routing + RCA/insight narratives)
+- **LLM:** OpenAI **GPT-4o-mini** by default (agent routing + RCA/insight narratives).
+  Override with the `OPENAI_MODEL` env var — every agent reads it.
 - **Protocol:** MCP (`mcp` Python SDK / FastMCP), stdio transport
-- **Tests:** `pytest` + `pytest-asyncio` — 398 tests (278 unit, 120 integration)
+- **Tests:** `pytest` + `pytest-asyncio` — 300+ unit tests + live integration tests
+  (`tests/test_task02.py` … `test_task25.py`)
+
+### What's new in this revision
+- **Model:** switched the default to `gpt-4o-mini` (cheaper/faster); all agents now
+  honour `OPENAI_MODEL`.
+- **DELETE support:** physical deletes are now first-class, approval-gated write
+  tools (`delete_customer_note`, `delete_customer_address`, `delete_customer_contact`,
+  `delete_costed_event`). Previously only INSERT/UPDATE worked.
+- **Change reporting:** approving a write now reports **how many rows changed and
+  what changed** (e.g. `1 row changed — account status: 'ACTIVE' -> 'INACTIVE'`).
+- **DBA tools (Group N):** 12 diagnostics + 4 maintenance writes — database health,
+  slow queries, deadlocks/blocking, wait events, tablespace usage, invalid objects,
+  unused/redundant indexes, stale statistics, long operations; plus `drop_index`,
+  `rebuild_index`, `gather_table_stats`, `recompile_object`. Exposed in plain English
+  via the new `dba_agent`.
+- **Conversation memory:** the chat client keeps context across turns — after an RCA
+  you can say *"apply recommendation 2"* or *"what about his unpaid bills?"* and it
+  stays on-thread.
 
 ---
 
@@ -81,7 +100,7 @@ DB_USER=MCP_APP
 DB_PASSWORD=mcp123
 DB_CONNECT_STRING=localhost:1521/FREEPDB1
 OPENAI_API_KEY=sk-...your-real-key...
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 > `.env` is gitignored — your secrets never get committed. `.env.example` is the
@@ -110,6 +129,24 @@ The agent then runs every generated query as `MCP_RO`, which only has
 `CREATE SESSION` + `SELECT` on `MCP_APP` — so any INSERT/UPDATE/DELETE/DDL fails
 at the database (ORA-01031). If these vars are unset, the agent transparently
 falls back to the main pool (no behavior change).
+
+### Optional: enable the full DBA performance metrics
+
+The DBA tools (Group N) work out of the box for everything based on the data
+dictionary (`USER_*`/`ALL_*` views): health, indexes, segments, statistics,
+long operations. Four metrics — **active sessions, blocking/deadlocks, slow
+queries, system wait events** — read the Oracle **V$** dynamic performance views,
+which `MCP_APP` cannot see by default. Until granted, those four tools return a
+clear *"needs DBA grant"* message (`available: false`) instead of failing.
+
+To enable live data for them, run the grant script as a DBA:
+
+```bash
+sqlplus system@localhost:1521/FREEPDB1 @sql/grant_dba_monitor.sql
+```
+
+This grants `SELECT_CATALOG_ROLE` (read-only monitoring access — no write
+ability). Reconnect the app afterwards.
 
 ---
 
@@ -218,6 +255,9 @@ unit suite is safe to run anywhere.
 - [`docs/TEST_QUESTIONS.txt`](docs/TEST_QUESTIONS.txt) — the full bank: **165
   questions organized per tool and agent** (every atomic tool + every agent),
   with the real seed identifiers to use. Type them into `python chat.py`.
+- [`docs/TEST_CASES_NEW_FEATURES.md`](docs/TEST_CASES_NEW_FEATURES.md) — focused,
+  copy-paste validation for the five new features (gpt-4o-mini, DELETE, RCA
+  follow-up, DBA tools, row-change reporting) with expected output for each.
 
 ---
 
@@ -230,7 +270,7 @@ Use these to confirm the system is healthy. Run each and compare.
 ```bash
 python -c "import asyncio, src.server as s; print(len(asyncio.run(s.mcp.list_tools())), 'tools')"
 ```
-**Expected:** `101 tools`
+**Expected:** `122 tools`
 
 ### 6.2 Schema introspection (no LLM)
 
@@ -310,6 +350,52 @@ you > change account ACC000123 currency to GBP
 you > change account ACC000123 currency to INR
   ...This will change it from 'GBP' to 'INR'. Reply 'yes' ... or 'no' ...
 ```
+
+### 6.10 DBA / database-administration questions (Group N + dba_agent)
+
+In `python chat.py`:
+```
+you > is the database healthy?
+you > show me unused indexes I could remove
+you > which tables have stale statistics?
+you > are there any deadlocks or blocking sessions right now?
+you > gather statistics for the CUSTOMER table
+```
+**Expected:** the first three return real data (health snapshot, ~17 review-candidate
+indexes, the stale-stats tables). The deadlock/blocking question returns live data
+only if `sql/grant_dba_monitor.sql` has been run; otherwise a clear *"needs DBA
+grant"* note. The last stages a maintenance change for approval.
+
+### 6.11 DELETE + change reporting
+
+In `python chat.py`:
+```
+you > add a general note 'temp' for customer CUST000122 created by me
+you > yes
+  Done - approved and applied (request #N). — 1 row changed; insert note: created 1 row
+you > delete customer note <that note id>
+you > yes
+  Done - approved and applied (request #N). — 1 row changed; delete customer note: deleted 1 row
+```
+**Expected:** every applied write now reports **rows changed** and a **before→after /
+created / deleted** summary. Deleting a non-existent id replies *"… does not exist -
+nothing to delete."* (no approval staged).
+
+### 6.12 RCA recommendation follow-up (conversation memory)
+
+In `python chat.py`:
+```
+you > investigate billing and usage issues for customer CUST000122
+  <root-cause summary>
+  Recommended actions (reply e.g. 'apply recommendation 1' or 'apply all'):
+    1. ...
+    2. ...
+you > apply recommendation 1
+  <stages the chosen action as a write for that same customer — context kept>
+```
+**Expected:** the assistant remembers the customer and the recommended actions, so
+"apply recommendation 1" (or "apply all", "the second one") acts on them without you
+re-stating the customer.
 
 ### 6.9 Real seed identifiers (for your own tests)
 

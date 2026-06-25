@@ -19,7 +19,7 @@ from src.tools import usage as _usage
 from src.utils.audit import log_audit
 
 _AGENT = "usage_read_agent"
-_MODEL = "gpt-4o"
+_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 _SYSTEM_PROMPT = (
     "You are a usage analytics assistant for the TCL Finance & Billing Oracle database "
