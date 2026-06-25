@@ -193,6 +193,73 @@ def _describe_change(action_type: str | None,
     return f"{label}: {rows_affected} {noun} affected"
 
 
+def _past_change_phrase(action_type: str | None,
+                        old_value_json: str | None,
+                        procedure_name: str | None) -> str:
+    """Human phrase for an ALREADY-applied change (no row count available),
+    reusing the same OLD_VALUE old_*/new_* convention as _describe_change."""
+    act = (action_type or "CHANGE").upper()
+    try:
+        old = json.loads(old_value_json) if old_value_json else {}
+    except (json.JSONDecodeError, TypeError):
+        old = {}
+    old = old if isinstance(old, dict) else {}
+
+    proc = (procedure_name or "").upper()
+    if proc in _MAINTENANCE:
+        verb, key = _MAINTENANCE[proc]
+        target = old.get(key)
+        return f"{verb} {target}".strip() if target else verb
+
+    before = after = None
+    for k, v in old.items():
+        if before is None and k.startswith("old_"):
+            before = v
+        elif after is None and k.startswith("new_"):
+            after = v
+    label = (procedure_name or act).replace("_", " ").lower()
+    if act == "UPDATE":
+        if before is not None and after is not None:
+            return f"{label}: '{before}' -> '{after}'"
+        if before is not None:
+            return f"{label}: was '{before}'"
+    return label
+
+
+async def get_recent_changes(limit: int = 10) -> dict:
+    """Return the most recently APPROVED (applied) changes from the approval
+    history, newest first, each with a human-readable summary. This is the
+    cross-session source for 'what changes have been made'."""
+    limit = _clamp(limit)
+    conn = await get_connection()
+    try:
+        rows = await _exec(conn, """
+            SELECT REQUEST_ID, PACKAGE_NAME, PROCEDURE_NAME, ACTION_TYPE,
+                   OLD_VALUE, APPROVED_BY,
+                   TO_CHAR(APPROVED_DTM, 'YYYY-MM-DD HH24:MI') AS approved_dtm
+            FROM   MCP_APP.MCP_APPROVAL_REQUEST
+            WHERE  STATUS = 'APPROVED'
+            ORDER BY APPROVED_DTM DESC NULLS LAST, REQUEST_ID DESC
+            FETCH FIRST :1 ROWS ONLY
+        """, [limit])
+        changes = [{
+            "request_id": r["request_id"],
+            "summary": _past_change_phrase(
+                r["action_type"], r.get("old_value"), r.get("procedure_name")),
+            "action_type": r["action_type"],
+            "approved_by": r.get("approved_by"),
+            "approved_dtm": r.get("approved_dtm"),
+        } for r in rows]
+        await log_audit(_TOOL, "", "get_recent_changes", "READ", {}, "SUCCESS")
+        return _ok(changes, len(changes))
+    except Exception as exc:
+        await log_audit(_TOOL, "", "get_recent_changes", "READ", {},
+                        "ERROR", str(exc))
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()
+
+
 # ── Internal helper used by all write tools ───────────────────────────────────
 
 async def create_approval_request(

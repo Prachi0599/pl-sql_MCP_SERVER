@@ -291,7 +291,7 @@ Use these to confirm the system is healthy. Run each and compare.
 ```bash
 python -c "import asyncio, src.server as s; print(len(asyncio.run(s.mcp.list_tools())), 'tools')"
 ```
-**Expected:** `124 tools`
+**Expected:** `125 tools`
 
 ### 6.2 Schema introspection (no LLM)
 

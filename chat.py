@@ -352,16 +352,44 @@ def _record_change(request_id, summary: str, action: str | None = None) -> None:
     })
 
 
-def _change_recap() -> str:
+def _format_session_changes() -> str:
     """Plain-English list of what was applied in THIS session (newest first)."""
     if not SESSION_CHANGES:
-        return ("I haven't applied any changes in this session yet. (Ask me to make "
-                "a change and approve it, then I'll track it here.)")
+        return "I haven't applied any changes in this session yet."
     lines = ["Here's what I've changed in this session (most recent first):"]
     for i, ch in enumerate(reversed(SESSION_CHANGES), 1):
         rid = ch.get("request_id")
         rid_txt = f" (request #{rid})" if rid else ""
         lines.append(f"  {i}. {ch['summary']}{rid_txt}")
+    return "\n".join(lines)
+
+
+async def _change_recap() -> str:
+    """What was changed — this session first; if none, fall back to the database
+    approval history so changes from earlier sessions still show up."""
+    if SESSION_CHANGES:
+        return _format_session_changes()
+    try:
+        from src.tools.approval import get_recent_changes
+        res = await get_recent_changes(10)
+    except Exception as exc:  # noqa: BLE001
+        res = {"success": False, "message": str(exc)}
+    rows = (res or {}).get("data") or []
+    if not rows:
+        return ("I haven't applied any changes in this session yet, and I don't see "
+                "any recently approved changes in the history.")
+    lines = ["I haven't applied changes in THIS session, but here are the most "
+             "recently approved changes (from the approval history):"]
+    for i, ch in enumerate(rows, 1):
+        rid = ch.get("request_id")
+        who = ch.get("approved_by")
+        when = ch.get("approved_dtm")
+        tail = ""
+        if who:
+            tail += f" — by {who}"
+        if when:
+            tail += f" on {when}"
+        lines.append(f"  {i}. {ch['summary']} (request #{rid}){tail}")
     return "\n".join(lines)
 
 
@@ -455,7 +483,7 @@ async def _handle(line: str) -> None:
     # 1b) "What did you change/create?" → answer from this session's change log,
     #     not a DB-wide query or a mis-routed schema dump.
     if not stripped.startswith("/") and _CHANGE_RECAP.search(stripped):
-        recap = _change_recap()
+        recap = await _change_recap()
         print(f"  {recap}")
         _remember(stripped, recap)
         return

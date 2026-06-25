@@ -459,9 +459,9 @@ def test_t25_29_session_change_recap_and_onboarding_steps():
     assert chat._CHANGE_RECAP.search("what did you create")
     assert not chat._CHANGE_RECAP.search("how many active customers")
     chat.SESSION_CHANGES.clear()
-    assert "haven't applied any changes" in chat._change_recap()
+    assert "haven't applied any changes" in chat._format_session_changes()
     chat._record_change(101, "account status: 'ACTIVE' -> 'INACTIVE'", "update_account_status")
-    recap = chat._change_recap()
+    recap = chat._format_session_changes()
     assert "request #101" in recap and "INACTIVE" in recap
     # onboarding bundle detection
     leaf = {"total_steps": 5, "customer_number": "CUST-1",
@@ -511,6 +511,49 @@ async def test_t25_30c_currency_update_stores_new_code():
     assert old["old_currency"] == "INR" and old["new_currency"] == "USD"
 
 
+def test_t25_30d_past_change_phrase():
+    from src.tools.approval import _past_change_phrase
+    assert _past_change_phrase(
+        "UPDATE", json.dumps({"old_currency": "INR", "new_currency": "USD"}),
+        "UPDATE_ACCOUNT_CURRENCY") == "update account currency: 'INR' -> 'USD'"
+    assert _past_change_phrase(
+        "UPDATE", json.dumps({"table_name": "CUSTOMER"}),
+        "GATHER_TABLE_STATS") == "gathered optimizer statistics for CUSTOMER"
+    assert _past_change_phrase("INSERT", None, "CREATE_CUSTOMER") == "create customer"
+
+
+@pytest.mark.asyncio
+async def test_t25_30e_get_recent_changes_summarizes():
+    conn = _conn()
+    rows = [
+        {"request_id": 50, "package_name": "ACCOUNT_PKG",
+         "procedure_name": "UPDATE_ACCOUNT_STATUS", "action_type": "UPDATE",
+         "old_value": json.dumps({"old_status": "ACTIVE", "new_status": "INACTIVE"}),
+         "approved_by": "alice", "approved_dtm": "2026-06-26 10:00"},
+    ]
+    with _patch(_APPROVAL, conn, exec_side=[rows]):
+        from src.tools.approval import get_recent_changes
+        res = await get_recent_changes(5)
+    assert res["success"] is True and res["row_count"] == 1
+    assert res["data"][0]["summary"] == "update account status: 'ACTIVE' -> 'INACTIVE'"
+    assert res["data"][0]["approved_by"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_t25_30f_recap_falls_back_to_history():
+    """With no session changes, the recap pulls from the approval history."""
+    chat = _load_chat()
+    chat.SESSION_CHANGES.clear()
+    fake = {"success": True, "data": [
+        {"request_id": 77, "summary": "delete customer", "action_type": "DELETE",
+         "approved_by": "bob", "approved_dtm": "2026-06-26 09:00"}]}
+    with patch("src.tools.approval.get_recent_changes",
+               new_callable=AsyncMock, return_value=fake):
+        recap = await chat._change_recap()
+    assert "approval history" in recap and "delete customer" in recap
+    assert "request #77" in recap and "bob" in recap
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # 6) Integration (live Oracle) — auto-skipped when DB unavailable
 # ════════════════════════════════════════════════════════════════════════════
@@ -553,6 +596,21 @@ async def test_t25_32_v_dollar_tools_dont_crash_live():
                    dba.get_slow_queries, dba.get_wait_events):
             r = await fn()
             assert r["success"] is True
+    finally:
+        await close_pool()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_t25_37_get_recent_changes_live():
+    from src.tools.approval import get_recent_changes
+    from src.db.pool import close_pool
+    try:
+        r = await get_recent_changes(5)
+        assert r["success"] is True
+        assert isinstance(r["data"], list)
+        for ch in r["data"]:
+            assert ch.get("summary") and "request_id" in ch
     finally:
         await close_pool()
 

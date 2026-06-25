@@ -225,7 +225,13 @@ you > show me what you have changed
     1. account status: 'ACTIVE' -> 'INACTIVE' (request #N)
 ```
 **Expected:** only the changes **you** made in this session, newest first — not a
-DB-wide pending dump and not a schema/table listing.
+DB-wide pending dump and not a schema/table listing. Phrasings like *"what changes
+has made"*, *"show me what you inserted"*, *"show me the changes"* all work.
+
+**Cross-session fallback:** if you've just started a fresh `chat.py` (empty session
+log), the same question instead lists the **most recently approved changes from the
+approval history** (with who approved them and when) — so you still see what was
+applied in earlier sessions. Tool: `get_recent_changes`.
 
 ## R6. Account ops accept a customer number
 ```
@@ -243,4 +249,4 @@ asks which one.)
 python -m pytest tests/ -m "not integration" -q          # all unit tests
 python -c "import asyncio, src.server as s; print(len(asyncio.run(s.mcp.list_tools())), 'tools')"
 ```
-**Expected:** unit suite all green; `124 tools` registered.
+**Expected:** unit suite all green; `125 tools` registered.

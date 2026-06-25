@@ -354,6 +354,12 @@ async def get_audit_stats() -> dict:
     return await _approval.get_audit_stats()
 
 @mcp.tool()
+async def get_recent_changes(limit: int = 10) -> dict:
+    """Return the most recently APPROVED (applied) changes, newest first, each with
+    a human-readable summary. Cross-session 'what changes have been made'."""
+    return await _approval.get_recent_changes(limit)
+
+@mcp.tool()
 async def approve_request(request_id: int, approved_by: str) -> dict:
     """Approve a PENDING request and execute the stored DML action."""
     return await _approval.approve_request(request_id, approved_by)
