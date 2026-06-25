@@ -173,7 +173,26 @@ ability). Reconnect the app afterwards.
 
 ## 4. Running it
 
-### Option A — Interactive chat (recommended for testing it yourself)
+### Option A — Web UI (browser, best experience)
+
+A clean single-page chat UI in front of the same agent stack — plain-English
+answers, RCA, DBA diagnostics, and **approval-gated writes with Approve / Cancel
+buttons** (no typing `yes`/`no`), recommended-action chips after an RCA, and a
+session/audit change recap. No extra dependencies (uses the bundled
+`starlette` + `uvicorn`).
+
+```bash
+python web.py                      # then open http://127.0.0.1:8000
+python web.py --port 9000          # custom port
+python web.py --host 0.0.0.0       # expose on your LAN
+```
+
+Each browser tab is its own conversation. Writes are previewed and only applied
+when you click **Approve**; onboarding stages all 5 steps and applies them on a
+single Approve. Code: `web.py` (launcher), `src/web/app.py` (Starlette API),
+`src/web/session.py` (per-session engine), `src/web/static/index.html` (UI).
+
+### Option B — Interactive chat (terminal)
 
 ```bash
 python chat.py
@@ -220,7 +239,7 @@ you > yes
 | `/reject <id> <user>` | Reject a request directly — no DML runs |
 | `/quit` `/exit` | Leave |
 
-### Option B — Run as an MCP server (for Claude Desktop / any MCP client)
+### Option C — Run as an MCP server (for Claude Desktop / any MCP client)
 
 Both of these work (the second has a path bootstrap so running the file directly
 no longer throws `ModuleNotFoundError: No module named 'src'`):
