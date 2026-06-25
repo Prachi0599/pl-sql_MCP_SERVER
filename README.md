@@ -7,6 +7,10 @@ schema. Ask questions in plain English ("how many active customers do we have?",
 2026-06") and the server classifies the request, routes it through a 3-layer
 agent stack, calls the right Oracle packages/SQL, and returns structured JSON.
 
+> **New here / non-technical?** Read
+> [`docs/PROJECT_GUIDE_SIMPLE.md`](docs/PROJECT_GUIDE_SIMPLE.md) first — it explains
+> the whole project and everything it does in plain language, no jargon.
+
 - **Language:** Python 3.11+ (async)
 - **Database:** Oracle (`localhost:1521/FREEPDB1`, schema `MCP_APP`) via `oracledb`
 - **LLM:** OpenAI **GPT-4o-mini** by default (agent routing + RCA/insight narratives).
