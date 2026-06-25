@@ -71,13 +71,18 @@ SESSION_CHANGES: list[dict] = []   # [{"request_id","summary","action"}], newest
 # Broad on purpose: "show me what you have inserted", "show me the changes",
 # "what did you create", "list recent updates" should all hit the session log
 # rather than the LLM router (which previously dumped DB-wide / mis-routed rows).
+_CHANGE_NOUNS = (r"change|changes|insert|inserts|update|updates|edit|edits|"
+                 r"modification|modifications")
 _CHANGE_RECAP = re.compile(
+    # "(show/what) ... you/i/we ... (changed/inserted/...)"
     r"(what|which|show|list|tell|give|display).{0,40}"
     r"(you|i|we).{0,30}"
     r"(chang|creat|insert|add\b|updat|delet|modif|do\b|did|done|appl|made|edit)"
-    r"|(show|list|see|display|tell|give).{0,30}"
-    r"\b(change|changes|insert|inserts|update|updates|edit|edits|"
-    r"modification|modifications)\b"
+    # "show/list me the changes/inserts/updates"
+    rf"|(show|list|see|display|tell|give).{{0,30}}\b({_CHANGE_NOUNS})\b"
+    # "what changes has/were/have been made", "which updates happened"
+    rf"|\b(what|which)\b.{{0,25}}\b({_CHANGE_NOUNS})\b"
+    # "recent/latest/last/session changes"
     r"|\b(recent|latest|last|session)\b.{0,20}\b(change|insert|update|edit|action)s?\b",
     re.IGNORECASE,
 )

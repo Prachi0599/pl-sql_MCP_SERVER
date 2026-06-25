@@ -477,11 +477,14 @@ def test_t25_30b_change_recap_regex_breadth():
     chat = _load_chat()
     for hit in ["show me what you have inserted", "show me the changes",
                 "what did you create", "list recent updates",
-                "show me what you changed"]:
+                "show me what you changed", "what changes has made",
+                "what changes were made", "which updates happened",
+                "sjow me what you hage inserted"]:
         assert chat._CHANGE_RECAP.search(hit), hit
     for miss in ["show service requests", "how many active customers",
                  "Add a billing address for CUST000122",
-                 "change account ACC000122 currency to USD"]:
+                 "change account ACC000122 currency to USD",
+                 "what is the account balance"]:
         assert not chat._CHANGE_RECAP.search(miss), miss
 
 
