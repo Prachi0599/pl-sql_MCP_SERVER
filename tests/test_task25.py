@@ -160,10 +160,23 @@ async def test_t25_08_delete_costed_event_action_type_delete():
 
 def test_t25_09_describe_update_before_after():
     from src.tools.approval import _describe_change
-    old = json.dumps({"account_number": "ACC1", "old_status": "ACTIVE"})
+    # The "after" value comes from a new_* key in OLD_VALUE — NOT guessed from the
+    # SQL bind params (which are numeric IDs, e.g. currency_id/account_id).
+    old = json.dumps({"account_number": "ACC1",
+                      "old_status": "ACTIVE", "new_status": "INACTIVE"})
     new = json.dumps({"params": [10, "INACTIVE"]})
     s = _describe_change("UPDATE", old, new, "UPDATE_ACCOUNT_STATUS", 1)
     assert "ACTIVE" in s and "INACTIVE" in s and "1 row" in s
+
+
+def test_t25_09b_describe_currency_uses_code_not_id():
+    """Regression: currency update must show 'INR' -> 'USD', never the account id."""
+    from src.tools.approval import _describe_change
+    old = json.dumps({"account_number": "ACC000122",
+                      "old_currency": "INR", "new_currency": "USD"})
+    new = json.dumps({"params": [3, 122]})   # [currency_id, account_id]
+    s = _describe_change("UPDATE", old, new, "UPDATE_ACCOUNT_CURRENCY", 1)
+    assert "'INR' -> 'USD'" in s and "122" not in s
 
 
 def test_t25_10_describe_insert_and_delete():
@@ -457,6 +470,42 @@ def test_t25_29_session_change_recap_and_onboarding_steps():
     steps = chat._onboarding_steps(leaf)
     assert steps and len(steps) == 2 and steps[0]["request_id"] == 1
     assert chat._onboarding_steps({"data": []}) is None
+
+
+def test_t25_30b_change_recap_regex_breadth():
+    """Recap must catch 'inserted'/'show me the changes' but not read commands."""
+    chat = _load_chat()
+    for hit in ["show me what you have inserted", "show me the changes",
+                "what did you create", "list recent updates",
+                "show me what you changed"]:
+        assert chat._CHANGE_RECAP.search(hit), hit
+    for miss in ["show service requests", "how many active customers",
+                 "Add a billing address for CUST000122",
+                 "change account ACC000122 currency to USD"]:
+        assert not chat._CHANGE_RECAP.search(miss), miss
+
+
+@pytest.mark.asyncio
+async def test_t25_30c_currency_update_stores_new_code():
+    """update_account_currency must persist the human new value (new_currency)."""
+    conn = _conn()
+    captured = {}
+
+    async def _cap(c, **kw):
+        captured.update(kw)
+        return _PENDING
+
+    with _patch(_WRITES, conn, exec_side=[[{"currency_code": "INR"}]]):
+        with patch(f"{_WRITES}.resolve_account_or_customer",
+                   new_callable=AsyncMock, return_value=42):
+            with patch(f"{_WRITES}.resolve_currency_code",
+                       new_callable=AsyncMock, return_value=7):
+                with patch(f"{_WRITES}.create_approval_request",
+                           new_callable=AsyncMock, side_effect=_cap):
+                    from src.tools.writes import update_account_currency
+                    await update_account_currency("ACC000122", "USD")
+    old = json.loads(captured["old_value"])
+    assert old["old_currency"] == "INR" and old["new_currency"] == "USD"
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -191,7 +191,8 @@ async def update_provider_status(
             package_name="DIRECT_SQL",
             procedure_name="UPDATE_PROVIDER_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"provider_code": provider_code, "old_status": current}),
+            old_value=json.dumps({"provider_code": provider_code,
+                                   "old_status": current, "new_status": target}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -279,7 +280,8 @@ async def update_customer_status(
             package_name="CUSTOMER_PKG",
             procedure_name="UPDATE_CUSTOMER_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"customer_number": customer_number, "old_status": current}),
+            old_value=json.dumps({"customer_number": customer_number,
+                                   "old_status": current, "new_status": target}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -431,7 +433,8 @@ async def update_contact_email(
             package_name="DIRECT_SQL",
             procedure_name="UPDATE_CONTACT_EMAIL",
             action_type="UPDATE",
-            old_value=json.dumps({"contact_id": contact_id, "old_email": current}),
+            old_value=json.dumps({"contact_id": contact_id,
+                                   "old_email": current, "new_email": new_email}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -518,7 +521,8 @@ async def update_account_status(
             package_name="ACCOUNT_PKG",
             procedure_name="UPDATE_ACCOUNT_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"account_number": account_number, "old_status": current}),
+            old_value=json.dumps({"account_number": account_number,
+                                   "old_status": current, "new_status": target}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -563,7 +567,8 @@ async def set_account_billable(
             package_name="DIRECT_SQL",
             procedure_name="SET_ACCOUNT_BILLABLE",
             action_type="UPDATE",
-            old_value=json.dumps({"account_number": account_number, "old_flag": current}),
+            old_value=json.dumps({"account_number": account_number,
+                                   "old_flag": current, "new_flag": flag}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -611,7 +616,8 @@ async def update_account_currency(
             package_name="DIRECT_SQL",
             procedure_name="UPDATE_ACCOUNT_CURRENCY",
             action_type="UPDATE",
-            old_value=json.dumps({"account_number": account_number, "old_currency": current}),
+            old_value=json.dumps({"account_number": account_number,
+                                   "old_currency": current, "new_currency": target}),
             new_value=new_val,
             requested_by=requested_by,
         )
@@ -862,7 +868,8 @@ async def update_bill_status(
             package_name="BILLING_PKG",
             procedure_name="UPDATE_BILL_STATUS",
             action_type="UPDATE",
-            old_value=json.dumps({"invoice_number": invoice_number, "old_status": current}),
+            old_value=json.dumps({"invoice_number": invoice_number,
+                                   "old_status": current, "new_status": target}),
             new_value=new_val,
             requested_by=requested_by,
         )

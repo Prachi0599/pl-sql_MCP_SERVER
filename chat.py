@@ -67,11 +67,18 @@ _HISTORY_MAX = 12            # keep the last N turns for the presenter
 LAST_CONTEXT: dict | None = None   # {"customer_number","recommended_actions","rca_summary"}
 SESSION_CHANGES: list[dict] = []   # [{"request_id","summary","action"}], newest last
 
-# Questions that mean "tell me what YOU changed/created in this session".
+# Questions that mean "tell me what YOU changed/created/inserted in this session".
+# Broad on purpose: "show me what you have inserted", "show me the changes",
+# "what did you create", "list recent updates" should all hit the session log
+# rather than the LLM router (which previously dumped DB-wide / mis-routed rows).
 _CHANGE_RECAP = re.compile(
-    r"\bwhat\b.*\byou\b.*\b(change|changed|chang|creat|created|do|did|done|"
-    r"updat|updated|delet|deleted|appl|applied|modif)\w*"
-    r"|\b(recent|latest|last)\b.*\bchange",
+    r"(what|which|show|list|tell|give|display).{0,40}"
+    r"(you|i|we).{0,30}"
+    r"(chang|creat|insert|add\b|updat|delet|modif|do\b|did|done|appl|made|edit)"
+    r"|(show|list|see|display|tell|give).{0,30}"
+    r"\b(change|changes|insert|inserts|update|updates|edit|edits|"
+    r"modification|modifications)\b"
+    r"|\b(recent|latest|last|session)\b.{0,20}\b(change|insert|update|edit|action)s?\b",
     re.IGNORECASE,
 )
 
@@ -128,6 +135,9 @@ _PRESENTER_SYSTEM = (
     "Answer the user directly and conversationally in plain English. "
     "Be concise and specific - cite the actual numbers, names, codes and statuses "
     "from the data. Use short sentences or a small bullet list when listing items. "
+    "When listing service requests / tickets, ALWAYS include, for each one, who it "
+    "is assigned to (show 'Unassigned' when there is no assignee) and who raised/"
+    "created it, in addition to the description, priority and status. "
     "Never mention JSON, tools, agents, routing, or internal field names. "
     "If the data is empty or null, say that no matching records were found."
 )

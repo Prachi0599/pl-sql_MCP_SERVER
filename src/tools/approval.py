@@ -166,29 +166,25 @@ def _describe_change(action_type: str | None,
         target = old.get(target_key) if isinstance(old, dict) else None
         return f"{verb} {target}".strip() if target else verb
 
-    # Find a before/after pair in OLD_VALUE (tools store e.g. {"old_status": X}).
-    before = None
+    # Find the human before/after values in OLD_VALUE. Tools store the prior value
+    # as {"old_<thing>": X} and (where known) the target as {"new_<thing>": Y}.
+    # We deliberately do NOT guess the "after" from the SQL bind params — those are
+    # numeric IDs (e.g. currency_id / account_id), which produced wrong summaries
+    # like 'INR' -> '122'.
+    before = after = None
     for k, v in (old.items() if isinstance(old, dict) else []):
-        if k.startswith("old_"):
+        if before is None and k.startswith("old_"):
             before = v
-            break
-    new_params = {}
-    try:
-        nv = json.loads(new_value_json) if new_value_json else {}
-        new_params = nv if isinstance(nv, dict) else {}
-    except (json.JSONDecodeError, TypeError):
-        new_params = {}
+        elif after is None and k.startswith("new_"):
+            after = v
 
     label = (procedure_name or act).replace("_", " ").lower()
 
     if act == "UPDATE":
+        if before is not None and after is not None:
+            return f"{label}: '{before}' -> '{after}' ({rows_affected} {noun} changed)"
         if before is not None:
-            after = None
-            plist = new_params.get("params")
-            if isinstance(plist, list) and plist:
-                after = plist[-1]
-            arrow = f"'{before}' -> '{after}'" if after is not None else f"was '{before}'"
-            return f"{label}: {arrow} ({rows_affected} {noun} changed)"
+            return f"{label}: was '{before}' ({rows_affected} {noun} changed)"
         return f"{label}: {rows_affected} {noun} updated"
     if act == "INSERT":
         return f"{label}: created {rows_affected} {noun}"
