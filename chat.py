@@ -285,20 +285,22 @@ async def _resolve_pending(affirm: bool) -> None:
     if affirm:
         res = await approve_request(request_id, approver)
         if res.get("success"):
-            rows = res.get("rows_affected")
-            # Prefer the backend's change summary; otherwise reconstruct from the
-            # staged leaf's before/after values.
+            # The backend's change_summary already includes the row count where
+            # it is meaningful, so we show it as-is (no separate row-count prefix
+            # — that previously double-printed "1 row changed"). Fall back to the
+            # staged leaf's before/after values only if no summary is present.
             change = res.get("change_summary")
             if not change:
                 cur = leaf.get("current_value")
                 req = leaf.get("requested_value")
+                rows = res.get("rows_affected")
                 if cur is not None and req is not None:
                     change = f"changed from '{cur}' to '{req}'"
+                elif rows is not None:
+                    change = f"{rows} row{'s' if rows != 1 else ''} changed"
             dml = res.get("dml_result") or {}
             pq = dml.get("post_query_result") or {}
             details = []
-            if rows is not None:
-                details.append(f"{rows} row{'s' if rows != 1 else ''} changed")
             if change:
                 details.append(change)
             if pq:

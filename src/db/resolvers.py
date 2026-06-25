@@ -59,6 +59,49 @@ async def resolve_account_number(conn: oracledb.AsyncConnection, account_number:
     return int(row[0])
 
 
+async def resolve_account_or_customer(conn: oracledb.AsyncConnection,
+                                      identifier: str) -> int:
+    """Resolve an ACCOUNT_ID from either an account number OR a customer number.
+
+    Users often say "change the account status for customer CUST000150" — i.e.
+    they give a customer number where an account is expected. We try the account
+    number first; if that misses, we look the value up as a customer and use
+    their account when there is exactly one. With several accounts we raise a
+    helpful error listing them so the caller can pick.
+    """
+    # 1) Direct account-number hit.
+    with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT ACCOUNT_ID FROM MCP_APP.ACCOUNT "
+            "WHERE UPPER(ACCOUNT_NUMBER) = UPPER(:1)",
+            [identifier],
+        )
+        row = await cur.fetchone()
+    if row is not None:
+        return int(row[0])
+
+    # 2) Maybe it's a customer number — resolve to their account(s).
+    with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT a.ACCOUNT_ID, a.ACCOUNT_NUMBER "
+            "FROM   MCP_APP.ACCOUNT a "
+            "JOIN   MCP_APP.CUSTOMER c ON c.CUSTOMER_ID = a.CUSTOMER_ID "
+            "WHERE  UPPER(c.CUSTOMER_NUMBER) = UPPER(:1) "
+            "ORDER BY a.ACCOUNT_NUMBER",
+            [identifier],
+        )
+        accounts = await cur.fetchall()
+
+    if len(accounts) == 1:
+        return int(accounts[0][0])
+    if len(accounts) > 1:
+        nums = ", ".join(a[1] for a in accounts)
+        raise ValueError(
+            f"'{identifier}' is a customer with multiple accounts ({nums}). "
+            f"Please specify which account number.")
+    raise ValueError(f"Account '{identifier}' not found")
+
+
 async def resolve_product_code(conn: oracledb.AsyncConnection, product_code: str) -> int:
     with conn.cursor() as cur:
         await cur.execute(

@@ -125,17 +125,30 @@ async def _dispatch_dml(conn: oracledb.AsyncConnection,
     return result
 
 
+# DBA maintenance procedures whose effect is NOT measured in rows (DDL / DBMS_STATS
+# / recompiles). For these, "0 rows changed" is meaningless, so we describe the
+# action performed instead, naming the target from the OLD_VALUE JSON.
+_MAINTENANCE = {
+    "GATHER_TABLE_STATS": ("gathered optimizer statistics for", "table_name"),
+    "REBUILD_INDEX":      ("rebuilt index", "index_name"),
+    "RECOMPILE_OBJECT":   ("recompiled", "object_name"),
+    "DROP_INDEX":         ("dropped index", "index_name"),
+}
+
+
 def _describe_change(action_type: str | None,
                      old_value_json: str | None,
                      new_value_json: str | None,
                      procedure_name: str | None,
                      rows_affected: int) -> str:
-    """Build a short human-readable description of what an approved DML did.
+    """Build one human-readable sentence describing what an approved change did,
+    INCLUDING the row count where that is meaningful (so callers should not
+    re-state the row count separately).
 
-    Uses the OLD_VALUE / NEW_VALUE JSON captured when the request was staged.
     Examples:
-      "UPDATE on account status: 'ACTIVE' -> 'INACTIVE' (1 row changed)"
-      "INSERT_CURRENCY: created 1 record"
+      "update account status: 'ACTIVE' -> 'INACTIVE' (1 row changed)"
+      "insert currency: created 1 row"
+      "gathered optimizer statistics for CUSTOMER"     (no row count — maintenance)
     """
     act = (action_type or "CHANGE").upper()
     noun = "row" if rows_affected == 1 else "rows"
@@ -145,6 +158,13 @@ def _describe_change(action_type: str | None,
         old = json.loads(old_value_json) if old_value_json else {}
     except (json.JSONDecodeError, TypeError):
         old = {}
+
+    # DBA maintenance: name the action + target, no row count.
+    proc = (procedure_name or "").upper()
+    if proc in _MAINTENANCE:
+        verb, target_key = _MAINTENANCE[proc]
+        target = old.get(target_key) if isinstance(old, dict) else None
+        return f"{verb} {target}".strip() if target else verb
 
     # Find a before/after pair in OLD_VALUE (tools store e.g. {"old_status": X}).
     before = None

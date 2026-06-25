@@ -136,7 +136,7 @@ async def test_t12_05_update_account_status_resolves_account():
                               new_callable=AsyncMock, return_value=True))
         s.enter_context(patch(f"{_MODULE}.create_approval_request",
                               new_callable=AsyncMock, return_value=_PENDING))
-        s.enter_context(patch(f"{_MODULE}.resolve_account_number", acc_mock))
+        s.enter_context(patch(f"{_MODULE}.resolve_account_or_customer", acc_mock))
 
         from src.tools.writes import update_account_status
         result = await update_account_status("ACC-001", "INACTIVE")
@@ -151,7 +151,7 @@ async def test_t12_05_update_account_status_resolves_account():
 @pytest.mark.asyncio
 async def test_t12_05b_update_account_currency_noop_when_same():
     with _stack(exec_rows=[[{"currency_code": "USD"}]],
-                resolvers={"resolve_account_number": 42,
+                resolvers={"resolve_account_or_customer": 42,
                            "resolve_currency_code": 3})[0]:
         from src.tools.writes import update_account_currency
         result = await update_account_currency("ACC-001", "USD")
@@ -164,7 +164,7 @@ async def test_t12_05b_update_account_currency_noop_when_same():
 @pytest.mark.asyncio
 async def test_t12_05c_update_account_currency_stages_when_different():
     with _stack(exec_rows=[[{"currency_code": "USD"}]],
-                resolvers={"resolve_account_number": 42,
+                resolvers={"resolve_account_or_customer": 42,
                            "resolve_currency_code": 7})[0]:
         from src.tools.writes import update_account_currency
         result = await update_account_currency("ACC-001", "INR")

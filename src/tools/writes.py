@@ -24,6 +24,7 @@ import oracledb
 from src.db.pool import get_connection
 from src.db.resolvers import (
     resolve_account_number,
+    resolve_account_or_customer,
     resolve_company_code,
     resolve_currency_code,
     resolve_customer_number,
@@ -503,7 +504,7 @@ async def update_account_status(
 
     conn = await get_connection()
     try:
-        account_id = await resolve_account_number(conn, account_number)
+        account_id = await resolve_account_or_customer(conn, account_number)
         target = new_status.upper()
         current = await _current_value(
             conn, "SELECT STATUS FROM MCP_APP.ACCOUNT WHERE ACCOUNT_ID = :1",
@@ -545,7 +546,7 @@ async def set_account_billable(
 
     conn = await get_connection()
     try:
-        account_id = await resolve_account_number(conn, account_number)
+        account_id = await resolve_account_or_customer(conn, account_number)
         current = await _current_value(
             conn,
             "SELECT BILLABLE_FLAG FROM MCP_APP.ACCOUNT_DETAILS WHERE ACCOUNT_ID = :1",
@@ -589,7 +590,7 @@ async def update_account_currency(
 
     conn = await get_connection()
     try:
-        account_id = await resolve_account_number(conn, account_number)
+        account_id = await resolve_account_or_customer(conn, account_number)
         currency_id = await resolve_currency_code(conn, currency_code)
         target = currency_code.upper()
         current = await _current_value(conn, """
@@ -639,6 +640,10 @@ async def assign_product_to_account(
     """Insert a CUSTOMER_PRODUCT_DETAILS row after approval.
     Resolves all three codes before creating the request.
     """
+    if not customer_number or not customer_number.strip():
+        return _validation_error(
+            "customer_number is required - please specify which customer owns "
+            "the account.")
     conn = await get_connection()
     try:
         customer_id = await resolve_customer_number(conn, customer_number)
@@ -708,6 +713,10 @@ async def terminate_customer_product(
     requested_by: str = "mcp_user",
 ) -> dict:
     """Set CUSTOMER_PRODUCT_DETAILS.STATUS='TERMINATED' after approval."""
+    if not customer_number or not customer_number.strip():
+        return _validation_error(
+            "customer_number is required - please specify which customer owns "
+            "the product to terminate (e.g. 'terminate PROD0048 for CUST000122').")
     conn = await get_connection()
     try:
         customer_id = await resolve_customer_number(conn, customer_number)

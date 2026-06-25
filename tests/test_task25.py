@@ -312,6 +312,75 @@ def test_t25_20_followup_pronoun_appends_customer():
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# 7) Bug fixes — maintenance change phrasing, no duplicate row count,
+#    account-or-customer resolution, clearer missing-identifier errors
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_t25_21_maintenance_change_summary_has_no_row_count():
+    from src.tools.approval import _describe_change
+    assert _describe_change("UPDATE", json.dumps({"table_name": "CUSTOMER"}),
+                            json.dumps({"sql": "BEGIN .. END;"}),
+                            "GATHER_TABLE_STATS", 0) == \
+        "gathered optimizer statistics for CUSTOMER"
+    assert _describe_change("DELETE", json.dumps({"index_name": "IX_FOO"}),
+                            json.dumps({"sql": "DROP"}), "DROP_INDEX", 0) == \
+        "dropped index IX_FOO"
+    assert _describe_change("UPDATE", json.dumps({"object_name": "ACCOUNT_PKG"}),
+                            json.dumps({"sql": "ALTER"}), "RECOMPILE_OBJECT", 0) == \
+        "recompiled ACCOUNT_PKG"
+
+
+def test_t25_22_update_summary_states_row_count_exactly_once():
+    from src.tools.approval import _describe_change
+    s = _describe_change("UPDATE", json.dumps({"old_status": "ACTIVE"}),
+                         json.dumps({"params": [1, "INACTIVE"]}),
+                         "UPDATE_ACCOUNT_STATUS", 1)
+    assert s.count("1 row changed") == 1            # exactly once, not duplicated
+
+
+@pytest.mark.asyncio
+async def test_t25_23_resolve_account_or_customer_falls_back_to_customer():
+    """A customer number with exactly one account resolves to that account."""
+    from src.db import resolvers
+    cur = MagicMock()
+    # 1st execute = account lookup (miss), 2nd = customer's accounts (one hit)
+    cur.execute = AsyncMock()
+    cur.fetchone = AsyncMock(return_value=None)
+    cur.fetchall = AsyncMock(return_value=[(42, "ACC000150")])
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=cur)
+    cm.__exit__ = MagicMock(return_value=False)
+    conn = MagicMock()
+    conn.cursor = MagicMock(return_value=cm)
+    aid = await resolvers.resolve_account_or_customer(conn, "CUST000150")
+    assert aid == 42
+
+
+@pytest.mark.asyncio
+async def test_t25_24_resolve_account_or_customer_multi_account_raises():
+    from src.db import resolvers
+    cur = MagicMock()
+    cur.execute = AsyncMock()
+    cur.fetchone = AsyncMock(return_value=None)
+    cur.fetchall = AsyncMock(return_value=[(1, "ACC1"), (2, "ACC2")])
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=cur)
+    cm.__exit__ = MagicMock(return_value=False)
+    conn = MagicMock()
+    conn.cursor = MagicMock(return_value=cm)
+    with pytest.raises(ValueError, match="multiple accounts"):
+        await resolvers.resolve_account_or_customer(conn, "CUST1")
+
+
+@pytest.mark.asyncio
+async def test_t25_25_terminate_product_missing_customer_clear_error():
+    from src.tools.writes import terminate_customer_product
+    r = await terminate_customer_product("", "PROD0048")
+    assert r["success"] is False and r["error_code"] == "VALIDATION_ERROR"
+    assert "customer_number is required" in r["message"]
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # 6) Integration (live Oracle) — auto-skipped when DB unavailable
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -353,6 +422,24 @@ async def test_t25_32_v_dollar_tools_dont_crash_live():
                    dba.get_slow_queries, dba.get_wait_events):
             r = await fn()
             assert r["success"] is True
+    finally:
+        await close_pool()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_t25_34_resolve_customer_to_account_live():
+    """'change account status for customer CUST000150' must resolve to that
+    customer's account instead of failing 'Account not found'."""
+    from src.db.resolvers import resolve_account_or_customer
+    from src.db.pool import get_connection, close_pool
+    try:
+        conn = await get_connection()
+        try:
+            aid = await resolve_account_or_customer(conn, "CUST000150")
+            assert isinstance(aid, int) and aid > 0
+        finally:
+            await conn.close()
     finally:
         await close_pool()
 
