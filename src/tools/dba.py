@@ -177,7 +177,7 @@ async def get_blocking_sessions() -> dict:
         rows = await _exec(conn, """
             SELECT b.SID         AS blocker_sid,
                    w.SID         AS waiter_sid,
-                   b.SERIAL#     AS blocker_serial,
+                   bs.SERIAL#    AS blocker_serial,
                    bs.USERNAME   AS blocker_user,
                    ws.USERNAME   AS waiter_user,
                    ws.SECONDS_IN_WAIT AS waiter_seconds
