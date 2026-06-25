@@ -10,6 +10,12 @@ agent stack, calls the right Oracle packages/SQL, and returns structured JSON.
 > **New here / non-technical?** Read
 > [`docs/PROJECT_GUIDE_SIMPLE.md`](docs/PROJECT_GUIDE_SIMPLE.md) first — it explains
 > the whole project and everything it does in plain language, no jargon.
+>
+> **Want the deep, complete detail?** See
+> [`docs/TECHNICAL_REFERENCE.md`](docs/TECHNICAL_REFERENCE.md) — every concept (incl.
+> how MCP is implemented), the full schema, every tool & agent, the approval/audit
+> internals, **the models & technologies used**, and a **step-by-step log of every
+> error we hit and how we fixed it**.
 
 - **Language:** Python 3.11+ (async)
 - **Database:** Oracle (`localhost:1521/FREEPDB1`, schema `MCP_APP`) via `oracledb`
