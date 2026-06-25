@@ -49,18 +49,31 @@ except Exception:
     pass
 
 RAW_MODE = False
-# When a write is staged, holds (request_id, approver, human_description, leaf)
-# until the user confirms or cancels it.
+# When a single write is staged, holds (request_id, approver, human_description,
+# leaf) until the user confirms or cancels it.
 PENDING_APPROVAL: tuple | None = None
+# When a MULTI-STEP write is staged (e.g. onboarding), holds a dict
+# {"label": str, "steps": [{"request_id", "description"}, ...]} so a single
+# "yes" approves and applies every step in order.
+PENDING_BATCH: dict | None = None
 _APPROVER = "chat_user"
 
 # ── Conversation memory ───────────────────────────────────────────────────────
-# Rolling chat history (so natural follow-ups read in context) plus the last
-# "rich" result (e.g. an RCA) so the user can say "apply the recommended action"
-# or "what about his accounts?" and we keep the thread instead of starting cold.
+# Rolling chat history (so natural follow-ups read in context), the last "rich"
+# result (e.g. an RCA), and a log of changes APPLIED in this session so the user
+# can ask "what did you change/create?" and get exactly that — not a DB-wide dump.
 CHAT_HISTORY: list[dict] = []
 _HISTORY_MAX = 12            # keep the last N turns for the presenter
 LAST_CONTEXT: dict | None = None   # {"customer_number","recommended_actions","rca_summary"}
+SESSION_CHANGES: list[dict] = []   # [{"request_id","summary","action"}], newest last
+
+# Questions that mean "tell me what YOU changed/created in this session".
+_CHANGE_RECAP = re.compile(
+    r"\bwhat\b.*\byou\b.*\b(change|changed|chang|creat|created|do|did|done|"
+    r"updat|updated|delet|deleted|appl|applied|modif)\w*"
+    r"|\b(recent|latest|last)\b.*\bchange",
+    re.IGNORECASE,
+)
 
 _AFFIRMATIVE = {"yes", "y", "approve", "approved", "confirm", "ok", "okay",
                 "go ahead", "proceed", "do it", "sure"}
@@ -307,6 +320,7 @@ async def _resolve_pending(affirm: bool) -> None:
                 details.append(", ".join(f"{k}={v}" for k, v in pq.items()))
             tail = (" — " + "; ".join(details)) if details else ""
             print(f"  Done - approved and applied (request #{request_id}).{tail}")
+            _record_change(request_id, change or desc, leaf.get("action"))
         else:
             print(f"  Could not apply it: {res.get('message', res.get('error_code'))}")
     else:
@@ -314,8 +328,79 @@ async def _resolve_pending(affirm: bool) -> None:
         print(f"  Cancelled - no changes were made (request #{request_id} rejected).")
 
 
+def _record_change(request_id, summary: str, action: str | None = None) -> None:
+    """Remember a change APPLIED in this session, for 'what did you change?' recaps."""
+    SESSION_CHANGES.append({
+        "request_id": request_id,
+        "summary": summary or "change applied",
+        "action": action or "",
+    })
+
+
+def _change_recap() -> str:
+    """Plain-English list of what was applied in THIS session (newest first)."""
+    if not SESSION_CHANGES:
+        return ("I haven't applied any changes in this session yet. (Ask me to make "
+                "a change and approve it, then I'll track it here.)")
+    lines = ["Here's what I've changed in this session (most recent first):"]
+    for i, ch in enumerate(reversed(SESSION_CHANGES), 1):
+        rid = ch.get("request_id")
+        rid_txt = f" (request #{rid})" if rid else ""
+        lines.append(f"  {i}. {ch['summary']}{rid_txt}")
+    return "\n".join(lines)
+
+
+async def _resolve_batch(affirm: bool) -> None:
+    """Approve (and apply) or reject every step of a staged multi-step write."""
+    global PENDING_BATCH
+    from src.tools.approval import approve_request, reject_request
+    batch = PENDING_BATCH
+    PENDING_BATCH = None
+    steps = batch.get("steps", [])
+    label = batch.get("label", "request")
+    if affirm:
+        applied, failed = 0, 0
+        for st in steps:
+            rid = st.get("request_id")
+            if not rid:
+                continue
+            res = await approve_request(rid, _APPROVER)
+            if res.get("success"):
+                applied += 1
+                _record_change(rid, f"{st.get('description', label)}",
+                               st.get("description"))
+            else:
+                failed += 1
+                print(f"    Step #{rid} failed: "
+                      f"{res.get('message', res.get('error_code'))}")
+        msg = f"  Done - {label}: applied {applied} of {len(steps)} steps."
+        if failed:
+            msg += f" {failed} failed (see above)."
+        print(msg)
+    else:
+        for st in steps:
+            rid = st.get("request_id")
+            if rid:
+                await reject_request(rid, _APPROVER, "cancelled by user in chat")
+        print(f"  Cancelled - no changes were made ({label}: "
+              f"{len(steps)} steps rejected).")
+
+
+def _onboarding_steps(leaf: dict) -> list[dict] | None:
+    """If the result is a multi-step onboarding bundle, return its PENDING steps."""
+    if not isinstance(leaf, dict):
+        return None
+    steps = leaf.get("steps")
+    if not (isinstance(steps, list) and leaf.get("total_steps")):
+        return None
+    pending = [{"request_id": s.get("request_id"),
+                "description": s.get("description", "step")}
+               for s in steps if s.get("request_id") and s.get("status") == "PENDING"]
+    return pending or None
+
+
 async def _handle(line: str) -> None:
-    global RAW_MODE, PENDING_APPROVAL
+    global RAW_MODE, PENDING_APPROVAL, PENDING_BATCH
     from src.agents.intent_router import run as router_run
     from src.tools.approval import (
         get_pending_approvals, approve_request, reject_request,
@@ -328,6 +413,18 @@ async def _handle(line: str) -> None:
     low = stripped.lower()
 
     # 1) If a change is awaiting confirmation, interpret yes/no first.
+    if PENDING_BATCH is not None and not stripped.startswith("/"):
+        if low in _AFFIRMATIVE:
+            await _resolve_batch(affirm=True)
+            return
+        if low in _NEGATIVE:
+            await _resolve_batch(affirm=False)
+            return
+        n = len(PENDING_BATCH.get("steps", []))
+        print(f"  You have a {n}-step change awaiting confirmation. "
+              f"Reply 'yes' to apply all or 'no' to cancel.")
+        return
+
     if PENDING_APPROVAL is not None and not stripped.startswith("/"):
         if low in _AFFIRMATIVE:
             await _resolve_pending(affirm=True)
@@ -338,6 +435,14 @@ async def _handle(line: str) -> None:
         rid = PENDING_APPROVAL[0]
         print(f"  You have a change awaiting confirmation (request #{rid}). "
               f"Please reply 'yes' to apply or 'no' to cancel first.")
+        return
+
+    # 1b) "What did you change/create?" → answer from this session's change log,
+    #     not a DB-wide query or a mis-routed schema dump.
+    if not stripped.startswith("/") and _CHANGE_RECAP.search(stripped):
+        recap = _change_recap()
+        print(f"  {recap}")
+        _remember(stripped, recap)
         return
 
     # 2) Slash commands
@@ -393,6 +498,23 @@ async def _handle(line: str) -> None:
         return
 
     kind, leaf = _find_write(payload)
+
+    # Multi-step write (e.g. onboarding): stage all steps and ask to approve them
+    # together. "Onboard" means the user wants this created, so we drive it to
+    # completion on a single 'yes' instead of leaving 5 requests pending forever.
+    steps = _onboarding_steps(leaf)
+    if steps:
+        cust = leaf.get("customer_number")
+        acct = leaf.get("account_number")
+        who = f" for {cust}" if cust else ""
+        print(f"  I've prepared a {len(steps)}-step onboarding{who}"
+              + (f" (account {acct})" if acct else "") + ":")
+        for i, s in enumerate(steps, 1):
+            print(f"    {i}. {s['description']} (request #{s['request_id']})")
+        print("  Reply 'yes' to approve and apply ALL steps, or 'no' to cancel.")
+        PENDING_BATCH = {"label": f"onboarding{who}", "steps": steps}
+        _remember(stripped, f"Prepared {len(steps)}-step onboarding{who}.")
+        return
 
     if kind == "no_change":
         msg = leaf.get('message', 'No change needed.')

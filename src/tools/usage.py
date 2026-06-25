@@ -495,27 +495,34 @@ async def get_failed_load_summary(days_back: int = 7) -> dict:
 # ── I1: get_open_requests ─────────────────────────────────────────────────────
 
 async def get_open_requests(assigned_to: str | None = None) -> dict:
+    # Use an explicit SELECT (not the PL/SQL function) so every useful field is
+    # always present: description, who raised it (created_by), who it is assigned
+    # to, resolution notes, plus the customer name/number for context.
     conn = await get_connection()
     try:
-        try:
-            rows = await _callfunc_cursor(
-                conn, "SERVICE_REQUEST_PKG.GET_OPEN_REQUESTS",
-                [assigned_to])
-        except Exception:
-            params: list = []
-            assign_clause = ""
-            if assigned_to:
-                assign_clause = "AND UPPER(ASSIGNED_TO) = UPPER(:1)"
-                params.append(assigned_to)
-            rows = await _exec(conn, f"""
-                SELECT REQUEST_ID, CUSTOMER_ID, ACCOUNT_ID, REQUEST_TYPE,
-                       PRIORITY, STATUS, RAISED_BY, ASSIGNED_TO,
-                       CREATED_DTM, RESOLVED_DTM
-                FROM   MCP_APP.SERVICE_REQUEST
-                WHERE  STATUS IN ('OPEN', 'IN_PROGRESS')
-                {assign_clause}
-                ORDER BY PRIORITY DESC, CREATED_DTM ASC
-            """, params)
+        params: list = []
+        assign_clause = ""
+        if assigned_to:
+            assign_clause = "AND UPPER(sr.ASSIGNED_TO) = UPPER(:1)"
+            params.append(assigned_to)
+        rows = await _exec(conn, f"""
+            SELECT sr.REQUEST_ID, sr.REQUEST_TYPE, sr.PRIORITY, sr.STATUS,
+                   sr.DESCRIPTION,
+                   sr.RAISED_BY                         AS raised_by,
+                   sr.RAISED_BY                         AS created_by,
+                   NVL(sr.ASSIGNED_TO, 'Unassigned')    AS assigned_to,
+                   sr.RESOLUTION_NOTES,
+                   c.CUSTOMER_NUMBER, c.CUSTOMER_NAME,
+                   a.ACCOUNT_NUMBER,
+                   TO_CHAR(sr.CREATED_DTM,  'YYYY-MM-DD HH24:MI') AS created_dtm,
+                   TO_CHAR(sr.RESOLVED_DTM, 'YYYY-MM-DD HH24:MI') AS resolved_dtm
+            FROM   MCP_APP.SERVICE_REQUEST sr
+            LEFT JOIN MCP_APP.CUSTOMER c ON c.CUSTOMER_ID = sr.CUSTOMER_ID
+            LEFT JOIN MCP_APP.ACCOUNT  a ON a.ACCOUNT_ID  = sr.ACCOUNT_ID
+            WHERE  sr.STATUS IN ('OPEN', 'IN_PROGRESS')
+            {assign_clause}
+            ORDER BY sr.PRIORITY DESC, sr.CREATED_DTM ASC
+        """, params)
         await log_audit(_TOOL, "SERVICE_REQUEST_PKG", "GET_OPEN_REQUESTS",
                         "READ", {"assigned_to": assigned_to}, "SUCCESS")
         return _ok(rows, len(rows))
@@ -534,17 +541,21 @@ async def get_requests_by_customer(customer_number: str) -> dict:
     conn = await get_connection()
     try:
         cid = await resolve_customer_number(conn, customer_number)
-        try:
-            rows = await _callfunc_cursor(
-                conn, "SERVICE_REQUEST_PKG.GET_REQUESTS_BY_CUSTOMER", [cid])
-        except Exception:
-            rows = await _exec(conn, """
-                SELECT REQUEST_ID, REQUEST_TYPE, PRIORITY, STATUS,
-                       RAISED_BY, ASSIGNED_TO, CREATED_DTM, RESOLVED_DTM
-                FROM   MCP_APP.SERVICE_REQUEST
-                WHERE  CUSTOMER_ID = :1
-                ORDER BY CREATED_DTM DESC
-            """, [cid])
+        rows = await _exec(conn, """
+            SELECT sr.REQUEST_ID, sr.REQUEST_TYPE, sr.PRIORITY, sr.STATUS,
+                   sr.DESCRIPTION,
+                   sr.RAISED_BY                         AS raised_by,
+                   sr.RAISED_BY                         AS created_by,
+                   NVL(sr.ASSIGNED_TO, 'Unassigned')    AS assigned_to,
+                   sr.RESOLUTION_NOTES,
+                   a.ACCOUNT_NUMBER,
+                   TO_CHAR(sr.CREATED_DTM,  'YYYY-MM-DD HH24:MI') AS created_dtm,
+                   TO_CHAR(sr.RESOLVED_DTM, 'YYYY-MM-DD HH24:MI') AS resolved_dtm
+            FROM   MCP_APP.SERVICE_REQUEST sr
+            LEFT JOIN MCP_APP.ACCOUNT a ON a.ACCOUNT_ID = sr.ACCOUNT_ID
+            WHERE  sr.CUSTOMER_ID = :1
+            ORDER BY sr.CREATED_DTM DESC
+        """, [cid])
         await log_audit(_TOOL, "SERVICE_REQUEST_PKG",
                         "GET_REQUESTS_BY_CUSTOMER", "READ",
                         {"customer_number": customer_number}, "SUCCESS")

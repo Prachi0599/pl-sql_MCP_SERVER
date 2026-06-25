@@ -244,7 +244,7 @@ async def test_t09_12_get_open_requests_statuses():
          "assigned_to": "bob", "created_dtm": "2026-06-21",
          "resolved_dtm": None},
     ]
-    with _stack(callfunc_rows=reqs)[0]:
+    with _stack(exec_rows=[reqs])[0]:
         from src.tools.usage import get_open_requests
         result = await get_open_requests()
     assert result["success"] is True
@@ -262,7 +262,7 @@ async def test_t09_13_get_requests_by_customer():
          "status": "OPEN", "raised_by": "alice", "assigned_to": "bob",
          "created_dtm": "2026-06-22", "resolved_dtm": None},
     ]
-    with _stack(callfunc_rows=reqs,
+    with _stack(exec_rows=[reqs],
                 resolvers={"resolve_customer_number": 10})[0]:
         from src.tools.usage import get_requests_by_customer
         result = await get_requests_by_customer("CUST-001")

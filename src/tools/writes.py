@@ -1400,3 +1400,110 @@ async def delete_costed_event(
         return map_oracle_error(exc)
     finally:
         await conn.close()
+
+
+async def delete_account(
+    account_number: str,
+    requested_by: str = "mcp_user",
+) -> dict:
+    """HARD-DELETE an account and every record that depends on it, after approval.
+
+    "Delete means delete": this physically removes the ACCOUNT row plus all of its
+    dependent rows (billing adjustments, bills, costed events, product
+    assignments, account details) in foreign-key order within one approved
+    transaction. Service requests are kept (they belong to the customer) but their
+    ACCOUNT_ID link is cleared. This is irreversible once approved."""
+    if not account_number or not account_number.strip():
+        return _validation_error("account_number is required")
+    conn = await get_connection()
+    try:
+        account_id = await resolve_account_number(conn, account_number)
+        # Children first, parent last. Each statement binds [account_id].
+        stmts = [
+            "DELETE FROM MCP_APP.BILLING_ADJUSTMENT WHERE BILL_SUMMARY_ID IN "
+            "(SELECT BILL_SUMMARY_ID FROM MCP_APP.BILL_SUMMARY WHERE ACCOUNT_ID = :1)",
+            "DELETE FROM MCP_APP.BILLING_ADJUSTMENT WHERE ACCOUNT_ID = :1",
+            "DELETE FROM MCP_APP.BILL_SUMMARY WHERE ACCOUNT_ID = :1",
+            "DELETE FROM MCP_APP.COSTED_EVENT WHERE ACCOUNT_ID = :1",
+            "DELETE FROM MCP_APP.CUSTOMER_PRODUCT_DETAILS WHERE ACCOUNT_ID = :1",
+            "UPDATE MCP_APP.SERVICE_REQUEST SET ACCOUNT_ID = NULL WHERE ACCOUNT_ID = :1",
+            "DELETE FROM MCP_APP.ACCOUNT_DETAILS WHERE ACCOUNT_ID = :1",
+            "DELETE FROM MCP_APP.ACCOUNT WHERE ACCOUNT_ID = :1",
+        ]
+        new_val = json.dumps({
+            "statements": [{"sql": s, "params": [account_id]} for s in stmts]})
+        req = await create_approval_request(
+            conn,
+            package_name="DIRECT_SQL",
+            procedure_name="DELETE_ACCOUNT",
+            action_type="DELETE",
+            old_value=json.dumps({"account_number": account_number.upper()}),
+            new_value=new_val,
+            requested_by=requested_by,
+        )
+        await log_audit(_TOOL, "ACCOUNT", "delete_account", "DELETE",
+                        {"account_number": account_number}, "SUCCESS")
+        return _ok({**req, "account_number": account_number.upper(),
+                    "warning": "Hard delete — removes the account and all related "
+                               "bills, events, and product assignments."})
+    except ValueError as exc:
+        return _not_found(exc)
+    except Exception as exc:
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()
+
+
+async def delete_customer(
+    customer_number: str,
+    requested_by: str = "mcp_user",
+) -> dict:
+    """HARD-DELETE a customer and EVERYTHING belonging to them, after approval.
+
+    Physically removes the CUSTOMER row and all dependents — accounts (and their
+    bills, adjustments, events, product assignments, account details), addresses,
+    contacts, notes, and service requests — in foreign-key order within one
+    approved transaction. Irreversible once approved."""
+    if not customer_number or not customer_number.strip():
+        return _validation_error("customer_number is required")
+    conn = await get_connection()
+    try:
+        customer_id = await resolve_customer_number(conn, customer_number)
+        acc_subq = ("SELECT ACCOUNT_ID FROM MCP_APP.ACCOUNT WHERE CUSTOMER_ID = :1")
+        stmts = [
+            f"DELETE FROM MCP_APP.BILLING_ADJUSTMENT WHERE ACCOUNT_ID IN ({acc_subq})",
+            f"DELETE FROM MCP_APP.BILL_SUMMARY WHERE ACCOUNT_ID IN ({acc_subq})",
+            f"DELETE FROM MCP_APP.COSTED_EVENT WHERE ACCOUNT_ID IN ({acc_subq})",
+            f"DELETE FROM MCP_APP.ACCOUNT_DETAILS WHERE ACCOUNT_ID IN ({acc_subq})",
+            "DELETE FROM MCP_APP.CUSTOMER_PRODUCT_DETAILS WHERE CUSTOMER_ID = :1",
+            "DELETE FROM MCP_APP.SERVICE_REQUEST WHERE CUSTOMER_ID = :1",
+            "DELETE FROM MCP_APP.ACCOUNT WHERE CUSTOMER_ID = :1",
+            "DELETE FROM MCP_APP.CONTACT_DETAILS WHERE CONTACT_ID IN "
+            "(SELECT CONTACT_ID FROM MCP_APP.CONTACT WHERE CUSTOMER_ID = :1)",
+            "DELETE FROM MCP_APP.CONTACT WHERE CUSTOMER_ID = :1",
+            "DELETE FROM MCP_APP.ADDRESS WHERE CUSTOMER_ID = :1",
+            "DELETE FROM MCP_APP.CUSTOMER_NOTE WHERE CUSTOMER_ID = :1",
+            "DELETE FROM MCP_APP.CUSTOMER WHERE CUSTOMER_ID = :1",
+        ]
+        new_val = json.dumps({
+            "statements": [{"sql": s, "params": [customer_id]} for s in stmts]})
+        req = await create_approval_request(
+            conn,
+            package_name="DIRECT_SQL",
+            procedure_name="DELETE_CUSTOMER",
+            action_type="DELETE",
+            old_value=json.dumps({"customer_number": customer_number.upper()}),
+            new_value=new_val,
+            requested_by=requested_by,
+        )
+        await log_audit(_TOOL, "CUSTOMER", "delete_customer", "DELETE",
+                        {"customer_number": customer_number}, "SUCCESS")
+        return _ok({**req, "customer_number": customer_number.upper(),
+                    "warning": "Hard delete — removes the customer and ALL related "
+                               "accounts, bills, contacts, addresses, and tickets."})
+    except ValueError as exc:
+        return _not_found(exc)
+    except Exception as exc:
+        return map_oracle_error(exc)
+    finally:
+        await conn.close()

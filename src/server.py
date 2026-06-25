@@ -567,6 +567,20 @@ async def delete_costed_event(event_id: int,
     """Delete a costed usage event — returns PENDING approval request."""
     return await _writes.delete_costed_event(event_id, requested_by)
 
+@mcp.tool()
+async def delete_account(account_number: str,
+                         requested_by: str = "mcp_user") -> dict:
+    """Hard-delete an account and all related bills/events/products — PENDING approval.
+    Irreversible once approved (not a status change)."""
+    return await _writes.delete_account(account_number, requested_by)
+
+@mcp.tool()
+async def delete_customer(customer_number: str,
+                          requested_by: str = "mcp_user") -> dict:
+    """Hard-delete a customer and everything belonging to them — PENDING approval.
+    Irreversible once approved (not a status change)."""
+    return await _writes.delete_customer(customer_number, requested_by)
+
 
 # ── Group N — DBA / Database-Administration Tools ─────────────────────────────
 from src.tools import dba as _dba  # noqa: E402

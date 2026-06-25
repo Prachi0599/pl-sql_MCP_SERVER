@@ -40,6 +40,10 @@ _SYSTEM_PROMPT = (
     "identifier is missing from the request, still call the most appropriate tool "
     "but leave that field empty (\"\") so the system can tell the user it is missing "
     "— do not substitute a placeholder. "
+    "DELETE means DELETE: when the user asks to delete or remove an ACCOUNT or "
+    "CUSTOMER, call delete_account / delete_customer (a permanent hard delete) — do "
+    "NOT map it to a status change such as setting status to INACTIVE. Only use "
+    "update_*_status when the user explicitly asks to deactivate / change status. "
     "Never answer without calling a tool."
 )
 
@@ -512,6 +516,43 @@ _TOOL_DEFS: list[dict] = [
                     "requested_by": {"type": "string"},
                 },
                 "required": ["event_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_account",
+            "description": ("PERMANENTLY delete (hard delete) an account and all "
+                            "of its related bills, adjustments, usage events and "
+                            "product assignments. Use when the user says to DELETE "
+                            "or REMOVE an account — NOT for deactivating/setting "
+                            "status to inactive."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_number": {"type": "string"},
+                    "requested_by":   {"type": "string"},
+                },
+                "required": ["account_number"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_customer",
+            "description": ("PERMANENTLY delete (hard delete) a customer and "
+                            "EVERYTHING belonging to them — accounts, bills, "
+                            "contacts, addresses, notes and service requests. Use "
+                            "when the user says to DELETE or REMOVE a customer."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "customer_number": {"type": "string"},
+                    "requested_by":    {"type": "string"},
+                },
+                "required": ["customer_number"],
             },
         },
     },

@@ -162,10 +162,85 @@ python -c "from src.tools.approval import _describe_change as d; import json; pr
 
 ---
 
+---
+
+# Round-2 fixes (follow-up issues)
+
+Run `pytest tests/test_task25.py -q` to cover all of these automatically
+(unit `t25_21`–`t25_29`, live `t25_34`–`t25_36`). Manual steps below.
+
+## R1. DBA V$ metrics ("slowest queries", "deadlocks") show no records
+This is **not a bug** — Oracle's V$ performance views require `SELECT_CATALOG_ROLE`,
+which the application user `MCP_APP` does not have by default. The tools work the
+moment a DBA grants it:
+```bash
+sqlplus system@localhost:1521/FREEPDB1 @sql/grant_dba_monitor.sql
+```
+Then in chat: `what are the slowest queries?` / `are there deadlocks?` return live
+data. (All other DBA tools — health, indexes, stats, segments — work without it.)
+**Expected before grant:** a clear "needs DBA grant" message, `available:false`.
+**Expected after grant:** live rows.
+
+## R2. "delete" must really delete (no silent status change)
+```
+you > delete account ACC000XXX        # use a throwaway account
+  I've prepared this change (delete account) ... Reply 'yes' ...
+you > yes
+  Done - approved and applied (request #N). — delete account: deleted N rows
+```
+**Expected:** routed to `delete_account` (a hard delete of the account + its bills,
+events, adjustments, product links), **not** `update_account_status`. Same for
+`delete customer CUST000XXX` → `delete_customer` (removes the customer and ALL
+related accounts, contacts, addresses, notes, tickets). Irreversible after approval.
+> Tip: create a throwaway first (`create a customer …` / onboarding) so you don't
+> delete seed data. Automated test `t25_36` does exactly this round-trip.
+
+## R3. Service requests show created-by / assigned-to / description
+```
+you > show open service requests
+```
+**Expected:** each request lists **Description, Raised/Created By, Assigned To**
+(shows "Unassigned" when empty), Resolution Notes, Customer, Account, and dates —
+not just id/type/priority/status.
+
+## R4. Onboarding actually creates (not stuck PENDING)
+```
+you > Onboard a new customer 'Globex Ltd', company INV0001, type CORP, billing
+      address '5 Market St, Delhi, IN', contact 'Sam Lee' Director sam@globex.com,
+      account 'Globex Main' in USD, product PROD0048.
+  I've prepared a 5-step onboarding for CUST-0xxxxx (account ACC-0xxxxx):
+    1..5 ...
+  Reply 'yes' to approve and apply ALL steps, or 'no' to cancel.
+you > yes
+  Done - onboarding for CUST-0xxxxx: applied 5 of 5 steps.
+```
+**Expected:** a single **yes** applies all five steps. (Previously they stayed
+PENDING.)
+
+## R5. "What did you change/create?" = this session only
+After making a change in the same chat session:
+```
+you > show me what you have changed
+  Here's what I've changed in this session (most recent first):
+    1. account status: 'ACTIVE' -> 'INACTIVE' (request #N)
+```
+**Expected:** only the changes **you** made in this session, newest first — not a
+DB-wide pending dump and not a schema/table listing.
+
+## R6. Account ops accept a customer number
+```
+you > change account status to ACTIVE for customer CUST000150
+```
+**Expected:** resolves to that customer's account (`ACC000150`) and stages the
+change, instead of "Account not found". (If the customer has several accounts, it
+asks which one.)
+
+---
+
 ## One-shot regression check
 
 ```bash
 python -m pytest tests/ -m "not integration" -q          # all unit tests
 python -c "import asyncio, src.server as s; print(len(asyncio.run(s.mcp.list_tools())), 'tools')"
 ```
-**Expected:** unit suite all green; `122 tools` registered.
+**Expected:** unit suite all green; `124 tools` registered.

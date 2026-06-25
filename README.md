@@ -32,6 +32,27 @@ agent stack, calls the right Oracle packages/SQL, and returns structured JSON.
   you can say *"apply recommendation 2"* or *"what about his unpaid bills?"* and it
   stays on-thread.
 
+### Follow-up fixes (round 2)
+- **Hard deletes:** *"delete account ACC000123"* / *"delete customer CUST000122"* now
+  do a real, FK-ordered cascade **delete** (after approval) — not a status change.
+  `delete_account` / `delete_customer` remove the row and all dependents in one
+  approved transaction.
+- **Service requests** now always show **created-by, assigned-to, and the full
+  description** (plus resolution notes and customer/account) — driven by an explicit
+  query instead of the PL/SQL function's partial column set.
+- **Onboarding executes:** *"onboard a new customer …"* stages the 5 steps and asks
+  *"approve all? yes/no"* — a single **yes** applies all five (it no longer leaves
+  everything PENDING forever).
+- **"What did you change/create?"** is answered from this **session's** change log
+  (exactly what you just did), instead of a DB-wide dump or a mis-routed schema list.
+- **Account ops accept a customer number:** *"change account status for customer
+  CUST000150"* resolves to that customer's account.
+- **DBA V$ metrics** (slow queries, deadlocks/blocking, sessions, wait events) require
+  Oracle's `SELECT_CATALOG_ROLE`. This is an Oracle privilege the `MCP_APP` app user
+  lacks by default — **not** an app bug. Run `sql/grant_dba_monitor.sql` as a DBA once
+  to enable live data; until then those four tools return a clear "needs DBA grant"
+  message. All other DBA tools work without it.
+
 ---
 
 ## 1. What's in the box
@@ -270,7 +291,7 @@ Use these to confirm the system is healthy. Run each and compare.
 ```bash
 python -c "import asyncio, src.server as s; print(len(asyncio.run(s.mcp.list_tools())), 'tools')"
 ```
-**Expected:** `122 tools`
+**Expected:** `124 tools`
 
 ### 6.2 Schema introspection (no LLM)
 

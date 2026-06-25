@@ -381,6 +381,85 @@ async def test_t25_25_terminate_product_missing_customer_clear_error():
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# 8) Hard deletes, service-request fields, session-change recap, onboarding batch
+# ════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_t25_26_delete_account_stages_cascade_delete():
+    conn = _conn()
+    captured = {}
+
+    async def _cap(c, **kw):
+        captured.update(kw)
+        return _PENDING
+
+    with _patch(_WRITES, conn):
+        with patch(f"{_WRITES}.resolve_account_number",
+                   new_callable=AsyncMock, return_value=20):
+            with patch(f"{_WRITES}.create_approval_request",
+                       new_callable=AsyncMock, side_effect=_cap):
+                from src.tools.writes import delete_account
+                r = await delete_account("ACC000123")
+    assert r["success"] is True
+    assert captured["action_type"] == "DELETE"
+    payload = json.loads(captured["new_value"])
+    # cascade = several child deletes ending with the ACCOUNT row
+    assert payload["statements"][-1]["sql"].strip().endswith("WHERE ACCOUNT_ID = :1")
+    assert any("BILL_SUMMARY" in s["sql"] for s in payload["statements"])
+
+
+@pytest.mark.asyncio
+async def test_t25_27_delete_customer_stages_full_cascade():
+    conn = _conn()
+    captured = {}
+
+    async def _cap(c, **kw):
+        captured.update(kw)
+        return _PENDING
+
+    with _patch(_WRITES, conn):
+        with patch(f"{_WRITES}.resolve_customer_number",
+                   new_callable=AsyncMock, return_value=10):
+            with patch(f"{_WRITES}.create_approval_request",
+                       new_callable=AsyncMock, side_effect=_cap):
+                from src.tools.writes import delete_customer
+                r = await delete_customer("CUST000122")
+    assert r["success"] is True
+    tables = " ".join(s["sql"] for s in json.loads(captured["new_value"])["statements"])
+    for t in ("ACCOUNT", "CONTACT", "ADDRESS", "CUSTOMER_NOTE", "SERVICE_REQUEST"):
+        assert t in tables
+    assert json.loads(captured["new_value"])["statements"][-1]["sql"].endswith(
+        "WHERE CUSTOMER_ID = :1")
+
+
+@pytest.mark.asyncio
+async def test_t25_28_delete_account_requires_identifier():
+    from src.tools.writes import delete_account, delete_customer
+    assert (await delete_account(""))["error_code"] == "VALIDATION_ERROR"
+    assert (await delete_customer(""))["error_code"] == "VALIDATION_ERROR"
+
+
+def test_t25_29_session_change_recap_and_onboarding_steps():
+    chat = _load_chat()
+    # recap regex matches the user's phrasings, and ONLY answers from session log
+    assert chat._CHANGE_RECAP.search("show me what you have changed")
+    assert chat._CHANGE_RECAP.search("what did you create")
+    assert not chat._CHANGE_RECAP.search("how many active customers")
+    chat.SESSION_CHANGES.clear()
+    assert "haven't applied any changes" in chat._change_recap()
+    chat._record_change(101, "account status: 'ACTIVE' -> 'INACTIVE'", "update_account_status")
+    recap = chat._change_recap()
+    assert "request #101" in recap and "INACTIVE" in recap
+    # onboarding bundle detection
+    leaf = {"total_steps": 5, "customer_number": "CUST-1",
+            "steps": [{"request_id": 1, "status": "PENDING", "description": "Create customer"},
+                      {"request_id": 2, "status": "PENDING", "description": "Add address"}]}
+    steps = chat._onboarding_steps(leaf)
+    assert steps and len(steps) == 2 and steps[0]["request_id"] == 1
+    assert chat._onboarding_steps({"data": []}) is None
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # 6) Integration (live Oracle) — auto-skipped when DB unavailable
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -422,6 +501,59 @@ async def test_t25_32_v_dollar_tools_dont_crash_live():
                    dba.get_slow_queries, dba.get_wait_events):
             r = await fn()
             assert r["success"] is True
+    finally:
+        await close_pool()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_t25_35_service_requests_expose_full_fields_live():
+    from src.tools.usage import get_open_requests
+    from src.db.pool import close_pool
+    try:
+        r = await get_open_requests()
+        assert r["success"] is True
+        if r["data"]:
+            row = r["data"][0]
+            for field in ("description", "created_by", "assigned_to",
+                          "raised_by", "resolution_notes"):
+                assert field in row, f"missing {field}"
+    finally:
+        await close_pool()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_t25_36_hard_delete_customer_cascade_live():
+    """Create a throwaway customer + account, approve, hard-delete, verify gone."""
+    from src.tools import writes, approval
+    from src.tools.approval import _exec
+    from src.db.pool import get_connection, close_pool
+    try:
+        cr = await writes.create_customer("ZZ Pytest Del Co", "INV0001", "CORP")
+        await approval.approve_request(cr["request_id"], "pytest")
+        cust = cr["customer_number"]
+        ac = await writes.create_account(cust, "ZZ Pytest Acct", "USD")
+        await approval.approve_request(ac["request_id"], "pytest")
+        acct = ac["account_number"]
+
+        dr = await writes.delete_customer(cust)
+        assert dr["status"] == "PENDING"
+        dap = await approval.approve_request(dr["request_id"], "pytest")
+        assert dap["success"] is True
+        assert "deleted" in dap["change_summary"]
+
+        conn = await get_connection()
+        try:
+            left_c = await _exec(
+                conn, "SELECT COUNT(*) n FROM MCP_APP.CUSTOMER WHERE CUSTOMER_NUMBER=:1",
+                [cust])
+            left_a = await _exec(
+                conn, "SELECT COUNT(*) n FROM MCP_APP.ACCOUNT WHERE ACCOUNT_NUMBER=:1",
+                [acct])
+        finally:
+            await conn.close()
+        assert left_c[0]["n"] == 0 and left_a[0]["n"] == 0
     finally:
         await close_pool()
 
