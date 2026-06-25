@@ -625,9 +625,11 @@ async def test_t25_35_service_requests_expose_full_fields_live():
         assert r["success"] is True
         if r["data"]:
             row = r["data"][0]
-            for field in ("description", "created_by", "assigned_to",
+            for field in ("description", "assigned_to",
                           "raised_by", "resolution_notes"):
                 assert field in row, f"missing {field}"
+            # raised_by is the single creator field — no duplicate created_by
+            assert "created_by" not in row
     finally:
         await close_pool()
 

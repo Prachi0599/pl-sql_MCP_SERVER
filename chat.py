@@ -141,8 +141,9 @@ _PRESENTER_SYSTEM = (
     "Be concise and specific - cite the actual numbers, names, codes and statuses "
     "from the data. Use short sentences or a small bullet list when listing items. "
     "When listing service requests / tickets, ALWAYS include, for each one, who it "
-    "is assigned to (show 'Unassigned' when there is no assignee) and who raised/"
-    "created it, in addition to the description, priority and status. "
+    "is assigned to (show 'Unassigned' when there is no assignee) and who raised it "
+    "(the 'raised by' person — do not add a separate 'created by' line), in addition "
+    "to the description, priority and status. "
     "Never mention JSON, tools, agents, routing, or internal field names. "
     "If the data is empty or null, say that no matching records were found."
 )
