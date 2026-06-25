@@ -298,6 +298,9 @@ unit suite is safe to run anywhere.
 - [`docs/TEST_CASES_NEW_FEATURES.md`](docs/TEST_CASES_NEW_FEATURES.md) — focused,
   copy-paste validation for the five new features (gpt-4o-mini, DELETE, RCA
   follow-up, DBA tools, row-change reporting) with expected output for each.
+- [`docs/TOOL_TEST_CASES.md`](docs/TOOL_TEST_CASES.md) — **every one of the 125
+  tools** with **5+ example questions each** (625+ in total), grouped by module —
+  type them into the web UI or `chat.py`.
 
 ---
 
